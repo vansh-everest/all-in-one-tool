@@ -2,6 +2,7 @@
 import { useState } from "react";
 import { ReconSummary, type Summary } from "./ReconSummary";
 import { ResultsTable, type ResultRow } from "./ResultsTable";
+import type { ColumnFilter, FilterOp } from "@/lib/scrap-scale/filters";
 
 type Detection = {
   link: { index: number; header: string } | null;
@@ -14,15 +15,36 @@ type Detection = {
 type DetectResponse = {
   spreadsheetId: string;
   sheetTab: string;
+  sheets: string[];
   headers: string[];
   detection: Detection;
   rowCount: number;
 };
 
+/** Read a fetch Response as JSON without throwing on empty / non-JSON bodies. */
+async function readJson(res: Response): Promise<Record<string, unknown>> {
+  const text = await res.text();
+  if (!text) return {};
+  try {
+    return JSON.parse(text) as Record<string, unknown>;
+  } catch {
+    return { error: text.slice(0, 300) };
+  }
+}
+
+const FILTER_OPS: { value: FilterOp; label: string }[] = [
+  { value: "contains", label: "contains" },
+  { value: "equals", label: "equals" },
+  { value: "not_empty", label: "is not empty" },
+  { value: "empty", label: "is empty" },
+];
+
 export function ScrapScaleApp({ connected, connectedEmail }: { connected: boolean; connectedEmail: string | null }) {
   const [url, setUrl] = useState("");
   const [detect, setDetect] = useState<DetectResponse | null>(null);
+  const [sheetTab, setSheetTab] = useState<string>("");
   const [cols, setCols] = useState<{ link: number; expected: number; name: number }>({ link: -1, expected: -1, name: -1 });
+  const [filters, setFilters] = useState<ColumnFilter[]>([]);
   const [runId, setRunId] = useState<string | null>(null);
   const [progress, setProgress] = useState<{ processed: number; total: number; subtotal: number } | null>(null);
   const [rows, setRows] = useState<ResultRow[]>([]);
@@ -31,30 +53,48 @@ export function ScrapScaleApp({ connected, connectedEmail }: { connected: boolea
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  async function doDetect() {
+  async function doDetect(tab?: string) {
     setError(null);
     setBusy(true);
     const res = await fetch("/api/tools/scrap-scale/detect-columns", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ url }),
+      body: JSON.stringify({ url, ...(tab ? { tab } : {}) }),
     });
     setBusy(false);
     if (res.status === 409) {
       setError("Google access needs re-consent. Click Reconnect.");
       return;
     }
+    const body = await readJson(res);
     if (!res.ok) {
-      setError((await res.json()).error ?? "Detection failed");
+      setError((body.error as string) ?? "Detection failed");
       return;
     }
-    const d: DetectResponse = await res.json();
+    const d = body as unknown as DetectResponse;
     setDetect(d);
+    setSheetTab(d.sheetTab);
+    setFilters([]);
     setCols({
       link: d.detection.link?.index ?? -1,
       expected: d.detection.expected?.index ?? -1,
       name: d.detection.name?.index ?? -1,
     });
+  }
+
+  function changeSheet(tab: string) {
+    setSheetTab(tab);
+    doDetect(tab);
+  }
+
+  function addFilter() {
+    setFilters((f) => [...f, { index: 0, op: "contains", value: "" }]);
+  }
+  function updateFilter(i: number, patch: Partial<ColumnFilter>) {
+    setFilters((f) => f.map((flt, idx) => (idx === i ? { ...flt, ...patch } : flt)));
+  }
+  function removeFilter(i: number) {
+    setFilters((f) => f.filter((_, idx) => idx !== i));
   }
 
   async function doRun() {
@@ -71,20 +111,21 @@ export function ScrapScaleApp({ connected, connectedEmail }: { connected: boolea
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         spreadsheetId: detect.spreadsheetId,
-        sheetTab: detect.sheetTab,
+        sheetTab: sheetTab || detect.sheetTab,
         columns: {
           link: { index: cols.link },
           expected: cols.expected >= 0 ? { index: cols.expected } : null,
           name: cols.name >= 0 ? { index: cols.name } : null,
         },
+        filters,
       }),
     });
     if (!res.ok) {
       setBusy(false);
-      setError((await res.json()).error ?? "Run failed");
+      setError(((await readJson(res)).error as string) ?? "Run failed");
       return;
     }
-    const { runId: id, totalRows } = await res.json();
+    const { runId: id, totalRows } = await readJson(res) as { runId: string; totalRows: number };
     setRunId(id);
     setProgress({ processed: 0, total: totalRows, subtotal: 0 });
 
@@ -150,7 +191,7 @@ export function ScrapScaleApp({ connected, connectedEmail }: { connected: boolea
           placeholder="Paste Google Sheet URL"
           className="flex-1 rounded-md border px-3 py-2 text-sm text-gray-900"
         />
-        <button onClick={doDetect} disabled={busy || !url} className="rounded-md bg-gray-900 px-4 py-2 text-sm text-white disabled:opacity-50">
+        <button onClick={() => doDetect()} disabled={busy || !url} className="rounded-md bg-gray-900 px-4 py-2 text-sm text-white disabled:opacity-50">
           Detect columns
         </button>
       </div>
@@ -158,6 +199,23 @@ export function ScrapScaleApp({ connected, connectedEmail }: { connected: boolea
 
       {detect && (
         <div className="rounded-xl border bg-white p-4">
+          {detect.sheets.length > 1 && (
+            <label className="mb-4 block text-sm">
+              <span className="mb-1 block text-gray-600">Sheet / tab</span>
+              <select
+                value={sheetTab}
+                onChange={(e) => changeSheet(e.target.value)}
+                disabled={busy}
+                className="w-full rounded border px-2 py-1 text-gray-900 disabled:opacity-50 sm:w-72"
+              >
+                {detect.sheets.map((s) => (
+                  <option key={s} value={s}>
+                    {s}
+                  </option>
+                ))}
+              </select>
+            </label>
+          )}
           {detect.detection.ambiguous && (
             <p className="mb-2 text-sm text-amber-700">Two link columns matched — pick the correct one below.</p>
           )}
@@ -182,9 +240,61 @@ export function ScrapScaleApp({ connected, connectedEmail }: { connected: boolea
               </label>
             ))}
           </div>
+          <div className="mt-4 border-t pt-4">
+            <div className="mb-2 flex items-center justify-between">
+              <span className="text-sm text-gray-600">Filters (optional) — only rows matching all filters are processed</span>
+              <button onClick={addFilter} className="rounded border px-2 py-0.5 text-xs text-gray-700 hover:bg-gray-50">
+                + Add filter
+              </button>
+            </div>
+            {filters.length === 0 && <p className="text-xs text-gray-400">No filters — all rows will be processed.</p>}
+            <div className="space-y-2">
+              {filters.map((f, i) => {
+                const valueless = f.op === "empty" || f.op === "not_empty";
+                return (
+                  <div key={i} className="flex flex-wrap items-center gap-2">
+                    <select
+                      value={f.index}
+                      onChange={(e) => updateFilter(i, { index: Number(e.target.value) })}
+                      className="rounded border px-2 py-1 text-sm text-gray-900"
+                    >
+                      {detect.headers.map((h, idx) => (
+                        <option key={idx} value={idx}>
+                          {h || `(col ${idx + 1})`}
+                        </option>
+                      ))}
+                    </select>
+                    <select
+                      value={f.op}
+                      onChange={(e) => updateFilter(i, { op: e.target.value as FilterOp })}
+                      className="rounded border px-2 py-1 text-sm text-gray-900"
+                    >
+                      {FILTER_OPS.map((o) => (
+                        <option key={o.value} value={o.value}>
+                          {o.label}
+                        </option>
+                      ))}
+                    </select>
+                    {!valueless && (
+                      <input
+                        value={f.value ?? ""}
+                        onChange={(e) => updateFilter(i, { value: e.target.value })}
+                        placeholder="value"
+                        className="rounded border px-2 py-1 text-sm text-gray-900"
+                      />
+                    )}
+                    <button onClick={() => removeFilter(i)} className="rounded px-2 py-1 text-xs text-red-600 hover:bg-red-50">
+                      Remove
+                    </button>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+
           <div className="mt-4 flex items-center gap-3">
             <button onClick={doRun} disabled={busy || cols.link < 0} className="rounded-md bg-indigo-600 px-4 py-2 text-sm text-white disabled:opacity-50">
-              Run ({detect.rowCount} rows)
+              Run ({detect.rowCount} rows{filters.length ? ", filtered" : ""})
             </button>
             {progress && (
               <span className="text-sm text-gray-600">
