@@ -131,8 +131,56 @@ supabase/
 proxy.ts                    # Next.js 16 middleware (auth redirect + session refresh)
 ```
 
+## Scrap Scale (Accounting)
+
+Reconciles payment-screenshot amounts in a Google Sheet against a per-row "Total Fund Collection"
+expected amount, flags mismatches and duplicate transactions, and writes results back as a new dated
+tab — leaving the original tab untouched.
+
+### Google connection (reusable module)
+
+Scrap Scale (and future Google-backed tools) authenticate via **user-delegated OAuth** — no
+service-account keys. The OAuth consent screen is **Internal** to the everestfleet.in Workspace, so
+any org user can consent to the scopes without Google app verification.
+
+- **Scopes:** `https://www.googleapis.com/auth/spreadsheets` (read + write, to add the results tab) and
+  `https://www.googleapis.com/auth/drive.readonly` (to download the screenshots). Defined once in
+  `lib/google/scopes.ts`.
+- **Connect:** on the Scrap Scale page click **Connect Google** and consent with an account that has
+  access to the source sheet **and** the Drive folder holding the screenshots (a dedicated internal
+  account is recommended). The **refresh token** is encrypted at rest (AES-256-GCM via
+  `TOKEN_ENCRYPTION_KEY`) in `google_connections`, scoped by RLS to the Accounting department. Access
+  tokens are minted server-side per run and never reach the browser.
+- If the stored token is missing required scopes, the tool returns `reconsent_required` (409) and the
+  UI prompts **Reconnect**.
+
+### Usage
+
+1. **Connect Google** (once).
+2. Paste the **Google Sheet URL** → **Detect columns**. The tool fuzzy-matches the link column
+   (≈ "Upload Transaction Details") and the expected-amount column (≈ "Total Fund Collection"); if two
+   link columns match it picks the one that actually contains Drive links, else asks you to choose.
+   You can **override** any column before running.
+3. **Run** → a chunked, resumable job downloads each screenshot, OCRs it with Gemini Flash, sums valid
+   amounts per row, and shows live progress + a running subtotal. OCR results are cached by Drive file
+   id, so re-runs are fast and within free-tier limits.
+4. Review the **reconciliation summary** + **results table** (click an extracted value to see the
+   source screenshot(s) and what OCR read). Strict flagging: a row is flagged if the rounded difference
+   is not exactly 0.00. Duplicate transaction ids are flagged across rows; rows with no Drive link are
+   "note rows" excluded from the math.
+5. **Write results tab to sheet** → adds a `ScrapScale <date> <time>` tab with the original rows plus
+   `Extracted Values`, `Difference`, `Flag` columns. The source tab is never modified.
+6. **Download CSV / Excel**, and use **Run history** to review past runs and compare two side by side.
+
+### Env vars
+
+`GEMINI_API_KEY`, `GEMINI_MODEL` (default `gemini-2.5-flash`), `GOOGLE_CLIENT_ID`,
+`GOOGLE_CLIENT_SECRET`, `GOOGLE_REDIRECT_URI` (`…/api/google/oauth/callback`), `TOKEN_ENCRYPTION_KEY`
+(32-byte base64). See `.env.example`.
+
 ## Security note
 
 Rotate the Supabase service-role key and the database password if they were ever shared outside a
 secret manager. Keep both strictly in `.env.local` locally and in Vercel's server-side env in
-production.
+production. The Google `TOKEN_ENCRYPTION_KEY` must be stable across deploys (rotating it invalidates
+stored refresh tokens — users would re-consent).
