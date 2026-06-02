@@ -3,11 +3,10 @@ import { createClient } from "@/utils/supabase/server";
 import { requireAccounting } from "@/lib/scrap-scale/access";
 import { getAccessToken } from "@/lib/google/connection";
 import { SCRAP_SCALE_SCOPES } from "@/lib/google/scopes";
-import { downloadFile } from "@/lib/google/drive";
-import { geminiExtract } from "@/lib/scrap-scale/ocr";
+import { resolveDriveFiles, extractOneFile, type FileExtraction } from "@/lib/scrap-scale/extract";
 import { computeRow, type OcrUnit } from "@/lib/scrap-scale/compute";
 import { markDuplicates } from "@/lib/scrap-scale/duplicates";
-import { mapWithConcurrency, withRetry } from "@/lib/scrap-scale/queue";
+import { mapWithConcurrency } from "@/lib/scrap-scale/queue";
 
 const CHUNK = 8; // rows per invocation (keeps under serverless time limit)
 const CONCURRENCY = 5; // simultaneous OCR/Drive ops
@@ -38,41 +37,66 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ run
   const { accessToken } = await getAccessToken(departmentId, SCRAP_SCALE_SCOPES);
 
   for (const row of pending) {
-    const units = await mapWithConcurrency(row.links as string[], CONCURRENCY, async (fileId) => {
+    // Expand each Drive link into the actual files to OCR (folders → children).
+    const { files, errors } = await resolveDriveFiles(row.links as string[], accessToken);
+
+    const fileResults = await mapWithConcurrency(files, CONCURRENCY, async (file) => {
       if (!force) {
-        const { data: cached } = await supabase.from("ocr_cache").select("*").eq("file_id", fileId).maybeSingle();
-        if (cached) {
-          return {
-            amount: cached.amount as number | null,
-            readable: cached.amount !== null,
-            file_id: fileId,
-            txn_id: cached.txn_id as string | null,
-            detail: cached.raw_json,
-          };
+        const { data: cached } = await supabase
+          .from("ocr_cache")
+          .select("raw_json")
+          .eq("file_id", file.id)
+          .maybeSingle();
+        const fx = cached?.raw_json as Partial<FileExtraction> | undefined;
+        // Reuse the cache only for successful prior reads in the new shape; stale
+        // null/legacy entries (e.g. from before the pipeline fix) get re-OCR'd.
+        if (fx && fx.readable && Array.isArray(fx.payments)) {
+          return { ...fx, file_id: file.id, name: file.name, mimeType: file.mimeType } as FileExtraction;
         }
       }
-      try {
-        const { base64, mimeType } = await withRetry(() => downloadFile(fileId, accessToken));
-        const ocr = await withRetry(() => geminiExtract(base64, mimeType));
-        await supabase.from("ocr_cache").upsert({
-          file_id: fileId,
-          department_id: departmentId,
-          amount: ocr.amount,
-          currency: ocr.currency,
-          txn_id: ocr.txn_id,
-          date: ocr.date,
-          confidence: ocr.confidence,
-          raw_json: ocr,
-          fetched_at: new Date().toISOString(),
-        });
-        return { amount: ocr.amount, readable: ocr.amount !== null, file_id: fileId, txn_id: ocr.txn_id, detail: ocr };
-      } catch (e) {
-        return { amount: null, readable: false, file_id: fileId, txn_id: null, detail: { error: String(e) } };
-      }
+      const result = await extractOneFile(file, accessToken);
+      await supabase.from("ocr_cache").upsert({
+        file_id: file.id,
+        department_id: departmentId,
+        amount: result.amount,
+        currency: "INR",
+        txn_id: result.txn_ids[0] ?? null,
+        date: null,
+        confidence: 0,
+        raw_json: result,
+        fetched_at: new Date().toISOString(),
+      });
+      return result;
     });
 
-    const ocrUnits: OcrUnit[] = units.map((u) => ({ amount: u.amount, readable: u.readable }));
+    const ocrUnits: OcrUnit[] = fileResults.map((f) => ({ amount: f.amount, readable: f.readable }));
+    // A link we couldn't resolve, or a row whose links yielded no files, must not
+    // silently read as a clean zero — surface it as needs-review.
+    if (errors.length > 0 || fileResults.length === 0) ocrUnits.push({ amount: null, readable: false });
+
     const c = computeRow({ expected: row.expected_amount, ocr: ocrUnits, hasLinks: (row.links as string[]).length > 0 });
+
+    const details = [
+      ...fileResults.map((f) => ({
+        file_id: f.file_id,
+        name: f.name,
+        mimeType: f.mimeType,
+        amount: f.amount,
+        txn_ids: f.txn_ids,
+        readable: f.readable,
+        error: f.error,
+      })),
+      ...errors.map((e) => ({
+        file_id: e.id,
+        name: "(unreadable link)",
+        mimeType: "",
+        amount: null,
+        txn_ids: [] as string[],
+        readable: false,
+        error: e.error,
+      })),
+    ];
+
     await supabase
       .from("scrap_scale_run_rows")
       .update({
@@ -80,7 +104,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ run
         difference: c.difference,
         flagged: c.flagged,
         status: c.status,
-        ocr_details: units.map((u) => ({ file_id: u.file_id, amount: u.amount, txn_id: u.txn_id, detail: u.detail })),
+        ocr_details: details,
       })
       .eq("id", row.id);
   }
@@ -111,7 +135,7 @@ async function finalize(supabase: SupabaseServer, runId: string) {
   const dups = markDuplicates(
     all.map((r) => ({
       row_index: r.row_index as number,
-      txnIds: (((r.ocr_details as { txn_id: string | null }[]) ?? []).map((d) => d.txn_id ?? "")).filter(Boolean),
+      txnIds: ((r.ocr_details as { txn_ids?: string[] }[]) ?? []).flatMap((d) => d.txn_ids ?? []).filter(Boolean),
     })),
   );
   for (const r of all) {

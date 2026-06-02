@@ -39,6 +39,26 @@ const FILTER_OPS: { value: FilterOp; label: string }[] = [
   { value: "empty", label: "is empty" },
 ];
 
+type Payment = { amount: number; currency: string; txn_id: string | null; date: string | null };
+type TestFileResult = {
+  file_id: string;
+  name: string;
+  mimeType: string;
+  amount: number | null;
+  payments: Payment[];
+  txn_ids: string[];
+  readable: boolean;
+  error: string | null;
+  notes: string;
+};
+type TestLinkResponse = {
+  linkIds: string[];
+  fileCount: number;
+  truncated: boolean;
+  resolveErrors: { id: string; error: string }[];
+  results: TestFileResult[];
+};
+
 export function ScrapScaleApp({ connected, connectedEmail }: { connected: boolean; connectedEmail: string | null }) {
   const [url, setUrl] = useState("");
   const [detect, setDetect] = useState<DetectResponse | null>(null);
@@ -52,6 +72,33 @@ export function ScrapScaleApp({ connected, connectedEmail }: { connected: boolea
   const [sumExpected, setSumExpected] = useState(0);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  const [testUrl, setTestUrl] = useState("");
+  const [testBusy, setTestBusy] = useState(false);
+  const [testResult, setTestResult] = useState<TestLinkResponse | null>(null);
+  const [testError, setTestError] = useState<string | null>(null);
+
+  async function doTestLink() {
+    setTestError(null);
+    setTestResult(null);
+    setTestBusy(true);
+    const res = await fetch("/api/tools/scrap-scale/test-link", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ url: testUrl }),
+    });
+    setTestBusy(false);
+    if (res.status === 409) {
+      setTestError("Google access needs re-consent. Click Reconnect above.");
+      return;
+    }
+    const body = await readJson(res);
+    if (!res.ok) {
+      setTestError((body.error as string) ?? "Test failed");
+      return;
+    }
+    setTestResult(body as unknown as TestLinkResponse);
+  }
 
   async function doDetect(tab?: string) {
     setError(null);
@@ -196,6 +243,62 @@ export function ScrapScaleApp({ connected, connectedEmail }: { connected: boolea
         </button>
       </div>
       {error && <p className="text-sm text-red-600">{error}</p>}
+
+      <details className="rounded-xl border bg-white p-4">
+        <summary className="cursor-pointer text-sm font-medium text-gray-700">
+          Test a Drive link (diagnose extraction)
+        </summary>
+        <p className="mt-2 text-xs text-gray-500">
+          Paste a single Drive link (or a cell&apos;s contents) to see exactly which files are found and what Gemini reads
+          — images, PDFs, multi-page files, and folders are all supported. Skips the cache.
+        </p>
+        <div className="mt-3 flex gap-2">
+          <input
+            value={testUrl}
+            onChange={(e) => setTestUrl(e.target.value)}
+            placeholder="Paste a Google Drive link"
+            className="flex-1 rounded-md border px-3 py-2 text-sm text-gray-900"
+          />
+          <button
+            onClick={doTestLink}
+            disabled={testBusy || !testUrl}
+            className="rounded-md bg-gray-900 px-4 py-2 text-sm text-white disabled:opacity-50"
+          >
+            {testBusy ? "Testing…" : "Test"}
+          </button>
+        </div>
+        {testError && <p className="mt-2 text-sm text-red-600">{testError}</p>}
+        {testResult && (
+          <div className="mt-3 space-y-2 text-sm">
+            <p className="text-gray-600">
+              Found <b>{testResult.fileCount}</b> file{testResult.fileCount === 1 ? "" : "s"}
+              {testResult.truncated ? " (showing first 10)" : ""} from {testResult.linkIds.length} link(s).
+            </p>
+            {testResult.resolveErrors.map((e) => (
+              <p key={e.id} className="text-red-600">
+                Could not open <code>{e.id}</code>: {e.error}
+              </p>
+            ))}
+            {testResult.results.map((r) => (
+              <div key={r.file_id} className="rounded border p-2">
+                <div className="flex items-center justify-between">
+                  <span className="font-medium text-gray-900">{r.name}</span>
+                  <span className="text-xs text-gray-400">{r.mimeType}</span>
+                </div>
+                {r.readable ? (
+                  <div className="text-gray-700">
+                    amount: <b>₹{(r.amount ?? 0).toLocaleString("en-IN")}</b>
+                    {r.payments.length > 1 ? ` (${r.payments.length} payments)` : ""}
+                    {r.txn_ids.length ? ` · txn ${r.txn_ids.join(", ")}` : ""}
+                  </div>
+                ) : (
+                  <div className="text-red-600">{r.error ?? "Could not read amount"}</div>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+      </details>
 
       {detect && (
         <div className="rounded-xl border bg-white p-4">

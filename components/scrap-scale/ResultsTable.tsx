@@ -12,7 +12,18 @@ export type ResultRow = {
   flagged: boolean | null;
   duplicate: boolean;
   status: string;
-  ocr_details: { file_id: string; amount: number | null; txn_id: string | null }[] | null;
+  ocr_details:
+    | {
+        file_id: string;
+        name?: string;
+        mimeType?: string;
+        amount: number | null;
+        txn_ids?: string[];
+        txn_id?: string | null;
+        readable?: boolean;
+        error?: string | null;
+      }[]
+    | null;
 };
 
 export function ResultsTable({ rows }: { rows: ResultRow[] }) {
@@ -62,16 +73,35 @@ export function ResultsTable({ rows }: { rows: ResultRow[] }) {
               <tr className="bg-gray-50">
                 <td colSpan={7} className="px-4 py-3">
                   <div className="flex flex-wrap gap-4">
-                    {(r.ocr_details ?? []).map((d) => (
-                      <div key={d.file_id} className="w-48">
-                        {/* eslint-disable-next-line @next/next/no-img-element */}
-                        <img src={`/api/tools/scrap-scale/image?file=${d.file_id}`} alt="screenshot" className="rounded border" />
-                        <div className="mt-1 text-xs text-gray-600">
-                          amount: <b>{d.amount ?? "unreadable"}</b>
-                          {d.txn_id ? ` · txn ${d.txn_id}` : ""}
+                    {(r.ocr_details ?? []).map((d) => {
+                      const isImg = (d.mimeType ?? "").startsWith("image/");
+                      const txns = d.txn_ids ?? (d.txn_id ? [d.txn_id] : []);
+                      return (
+                        <div key={d.file_id} className="w-48">
+                          {isImg ? (
+                            // eslint-disable-next-line @next/next/no-img-element
+                            <img src={`/api/tools/scrap-scale/image?file=${d.file_id}`} alt={d.name ?? "screenshot"} className="rounded border" />
+                          ) : (
+                            <a
+                              href={`/api/tools/scrap-scale/image?file=${d.file_id}`}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="flex h-32 items-center justify-center rounded border bg-white text-xs text-indigo-700 hover:underline"
+                            >
+                              {d.mimeType?.includes("pdf") ? "Open PDF" : "Open file"}
+                            </a>
+                          )}
+                          <div className="mt-1 truncate text-xs text-gray-500" title={d.name}>
+                            {d.name}
+                          </div>
+                          <div className="text-xs text-gray-600">
+                            amount: <b>{d.amount ?? "—"}</b>
+                            {txns.length ? ` · txn ${txns.join(", ")}` : ""}
+                          </div>
+                          {d.error && <div className="text-xs text-red-600">{d.error}</div>}
                         </div>
-                      </div>
-                    ))}
+                      );
+                    })}
                     {(r.ocr_details ?? []).length === 0 && <span className="text-xs text-gray-500">No screenshots for this row.</span>}
                   </div>
                 </td>
