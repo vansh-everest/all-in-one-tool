@@ -1,36 +1,138 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Everest Fleet — Internal Tools Platform
 
-## Getting Started
+A dashboard of **departments**, each containing **tools**, with per-department access control.
+This repository is the **platform shell (v1)**: authentication, access gating, a pluggable tool
+registry, and an admin page. The first tool, **Scrap Scale** (Accounting), is currently a
+"Coming soon" placeholder — its real implementation arrives in a later prompt.
 
-First, run the development server:
+## Stack
+
+- **Next.js 16** (App Router, TypeScript) — server components + server actions
+- **Supabase** (Postgres) with **Row Level Security** on every table
+- **Supabase Auth** (email/password) via `@supabase/ssr` cookie sessions
+- **Tailwind CSS v4**
+
+## Prerequisites
+
+- Node.js 20+ (developed on Node 25)
+- A Supabase project (URL, publishable key, service-role key, and the Postgres connection string)
+
+## Environment
+
+Copy `.env.example` to `.env.local` and fill in:
+
+| Variable | Used by | Notes |
+| --- | --- | --- |
+| `NEXT_PUBLIC_SUPABASE_URL` | app + scripts | Supabase project URL |
+| `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` | app (browser + SSR) | Replaces the legacy anon key; RLS-scoped |
+| `SUPABASE_SERVICE_ROLE_KEY` | seed + admin actions | **Server only.** Bypasses RLS. Never exposed to the client |
+| `DIRECT_URL` | `migrate.mjs`, `seed.mjs` | Postgres connection string (session-mode pooler). Migrations/seed only |
+| `SEED_SUPER_ADMIN_EMAIL` | `seed.mjs` | Initial super_admin email |
+| `SEED_SUPER_ADMIN_PASSWORD` | `seed.mjs` | Initial super_admin password (change after first login) |
+
+`.env.local` is gitignored. The service-role key and DB password must never be committed or shipped
+to the client bundle.
+
+## Setup
 
 ```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+npm install
+
+# 1. Apply database migrations (tables, RLS, trigger, helper functions)
+node --env-file=.env.local supabase/migrate.mjs
+
+# 2. Seed the 5 departments + the super_admin
+node --env-file=.env.local supabase/seed.mjs
+
+# 3. Run
+npm run dev          # http://localhost:3000
+npm test             # unit tests for access logic
+npm run build        # production build + typecheck
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+After seeding, sign in at `/sign-in` with `SEED_SUPER_ADMIN_EMAIL` / `SEED_SUPER_ADMIN_PASSWORD`.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+### Disable public sign-ups (important)
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+Accounts are created **only by admins** (see below). There is no `/sign-up` route. To prevent any
+self-registration via the Supabase API, also turn **off** "Allow new users to sign up" in the
+Supabase dashboard → Authentication → Providers → Email.
 
-## Learn More
+## How access control works
 
-To learn more about Next.js, take a look at the following resources:
+Access is enforced in **two layers**:
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+1. **RLS (database).** Every table has policies. To avoid policy recursion, the policies call three
+   `SECURITY DEFINER` helper functions defined in `supabase/migrations/0001_init.sql`:
+   `is_super_admin(uid)`, `is_member_of(dept, uid)`, `is_dept_admin(dept, uid)`. A user can only read
+   departments/memberships tied to departments they belong to; super_admin bypasses everything.
+2. **Server route guards.** `lib/auth/guards.ts` (`requireUser`, `requireDepartmentAccess`) resolve
+   the user server-side and redirect if they lack membership. The `proxy.ts` (Next.js 16's renamed
+   middleware) redirects unauthenticated requests to `/sign-in` and refreshes the session cookie.
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+Roles: a membership is `admin` or `member` per department. `profiles.is_super_admin` grants global
+access. The `/admin` page is super_admin-only in v1.
 
-## Deploy on Vercel
+## Admin-only user creation
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+1. Sign in as a super_admin → **Admin** in the sidebar (`/admin`).
+2. **Add user**: enter email + full name. The server creates the Supabase Auth user (via the
+   service-role admin API, `email_confirm: true`) and displays a **one-time temp password** — hand it
+   to the user; they sign in and change it.
+3. **Memberships**: the grid assigns each user `member`/`admin`/none per department; changes save on
+   selection.
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+New users see an empty dashboard until granted department access.
+
+## How to add a new tool
+
+Tools are declared in one place; pages derive everything from the registry.
+
+1. Add a `ToolDef` to `lib/tools/registry.ts`:
+   ```ts
+   {
+     slug: "my-tool",
+     name: "My Tool",
+     description: "What it does.",
+     departmentSlug: "operations",
+     icon: "Wrench",                 // a lucide icon name
+     route: "/operations/my-tool",
+     requiredRole: "member",         // optional; default "member"
+   }
+   ```
+   The dashboard card counts, the department tool list, and the generic
+   `app/(app)/[department]/[tool]/page.tsx` guard all update automatically.
+2. To give the tool a real page (instead of the "Coming soon" stub), create a dedicated route at
+   `app/(app)/<department>/<tool>/page.tsx` (it takes precedence over the generic `[department]/[tool]`
+   route) and keep tool-specific logic under `lib/tools/<slug>/`. Always call
+   `requireDepartmentAccess(<departmentSlug>)` at the top so the server guard applies.
+
+## Project layout
+
+```
+app/
+  sign-in/                  # public sign-in (outside the authed group)
+  (app)/                    # authed shell (sidebar); route group, no URL segment
+    layout.tsx              # requires session; renders sidebar
+    page.tsx                # dashboard (department cards, filtered)
+    [department]/page.tsx   # tool list for a department
+    [department]/[tool]/    # generic tool page (renders stub in v1)
+    admin/                  # super_admin: users + memberships
+  account/actions.ts        # sign out / change password
+lib/
+  auth/guards.ts            # server guards
+  auth/access.ts            # pure, unit-tested access logic
+  tools/registry.ts         # the tool registry
+utils/supabase/             # server / client / proxy / admin clients
+supabase/
+  migrations/0001_init.sql  # schema + RLS
+  migrate.mjs               # applies migrations via DIRECT_URL
+  seed.mjs                  # departments + super_admin
+proxy.ts                    # Next.js 16 middleware (auth redirect + session refresh)
+```
+
+## Security note
+
+Rotate the Supabase service-role key and the database password if they were ever shared outside a
+secret manager. Keep both strictly in `.env.local` locally and in Vercel's server-side env in
+production.
