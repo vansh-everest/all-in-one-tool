@@ -1,4 +1,5 @@
 import { OCR_PROMPT } from "./prompt";
+import { parseGeminiKeys, isRateLimitStatus, nextStartIndex } from "./gemini-keys";
 
 export type Payment = {
   amount: number;
@@ -82,25 +83,34 @@ export function sumAmount(payments: Payment[]): number {
 
 /**
  * Sends a file (image or PDF) to Gemini inline and returns extracted payments.
- * Throws on HTTP error (status attached for backoff/retry).
+ * Rotates across the configured key pool: a 429 on one key immediately fails
+ * over to the next. If every key is rate-limited, throws a 429 so the caller's
+ * backoff/retry waits and retries the cycle. Non-429 HTTP errors throw at once.
  */
 export async function geminiExtract(base64: string, mimeType: string): Promise<OcrResult> {
   const model = process.env.GEMINI_MODEL || "gemini-2.5-flash";
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${process.env.GEMINI_API_KEY}`;
-  const res = await fetch(url, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      contents: [{ parts: [{ text: OCR_PROMPT }, { inline_data: { mime_type: mimeType, data: base64 } }] }],
-      generationConfig: { temperature: 0, responseMimeType: "application/json" },
-    }),
+  const keys = parseGeminiKeys();
+  const start = nextStartIndex(keys.length);
+  const body = JSON.stringify({
+    contents: [{ parts: [{ text: OCR_PROMPT }, { inline_data: { mime_type: mimeType, data: base64 } }] }],
+    generationConfig: { temperature: 0, responseMimeType: "application/json" },
   });
-  if (!res.ok) {
-    const err = new Error(`Gemini ${res.status}: ${await res.text()}`);
-    (err as unknown as { status: number }).status = res.status;
-    throw err;
+
+  let lastRateLimit: Error | null = null;
+  for (let n = 0; n < keys.length; n++) {
+    const key = keys[(start + n) % keys.length];
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${key}`;
+    const res = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body });
+    if (res.ok) {
+      const data = await res.json();
+      return parseOcr(data?.candidates?.[0]?.content?.parts?.[0]?.text ?? "");
+    }
+    const text = await res.text();
+    if (isRateLimitStatus(res.status)) {
+      lastRateLimit = Object.assign(new Error(`Gemini 429: ${text}`), { status: 429 });
+      continue; // try the next key
+    }
+    throw Object.assign(new Error(`Gemini ${res.status}: ${text}`), { status: res.status });
   }
-  const data = await res.json();
-  const text = data?.candidates?.[0]?.content?.parts?.[0]?.text ?? "";
-  return parseOcr(text);
+  throw lastRateLimit ?? Object.assign(new Error("Gemini: all keys exhausted"), { status: 429 });
 }
