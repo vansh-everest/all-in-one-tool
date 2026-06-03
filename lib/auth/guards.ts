@@ -7,8 +7,13 @@ const ALLOWED_DOMAINS = (process.env.ALLOWED_EMAIL_DOMAINS ?? "everestfleet.in,e
   .split(",")
   .map((s) => s.trim().toLowerCase())
   .filter(Boolean);
-const SUPER_ADMINS = (process.env.SUPER_ADMIN_EMAILS ?? "")
-  .split(",")
+// Baked-in so the primary owner is always super-admin on Google sign-in, even if
+// the SUPER_ADMIN_EMAILS env var is missing/misconfigured in a given environment.
+const DEFAULT_SUPER_ADMINS = ["vansh.sood@everestfleet.in"];
+const SUPER_ADMINS = [
+  ...DEFAULT_SUPER_ADMINS,
+  ...(process.env.SUPER_ADMIN_EMAILS ?? "").split(","),
+]
   .map((s) => s.trim().toLowerCase())
   .filter(Boolean);
 
