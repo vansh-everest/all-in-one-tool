@@ -29,17 +29,35 @@ type RunRow = {
 
 const num = (v: unknown) => (typeof v === "number" ? v : 0);
 
-export function RunHistory({ runs }: { runs: Run[] }) {
+export function RunHistory({ runs, canDelete = false }: { runs: Run[]; canDelete?: boolean }) {
+  const [list, setList] = useState<Run[]>(runs);
   const [a, setA] = useState<string | null>(null);
   const [b, setB] = useState<string | null>(null);
   const [openId, setOpenId] = useState<string | null>(null);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
   const [rowsCache, setRowsCache] = useState<Record<string, RunRow[]>>({});
-  const runA = runs.find((r) => r.id === a);
-  const runB = runs.find((r) => r.id === b);
+  const runA = list.find((r) => r.id === a);
+  const runB = list.find((r) => r.id === b);
 
-  if (!runs.length) return null;
+  if (!list.length) return null;
 
   const pick = (id: string) => (a === id ? setA(null) : b === id ? setB(null) : !a ? setA(id) : setB(id));
+
+  async function deleteRun(id: string) {
+    if (!confirm("Delete this run permanently? This also removes its row results and cannot be undone.")) return;
+    setDeletingId(id);
+    const res = await fetch(`/api/tools/scrap-scale/run/${id}`, { method: "DELETE" });
+    setDeletingId(null);
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      alert((body as { error?: string }).error ?? "Delete failed");
+      return;
+    }
+    setList((cur) => cur.filter((r) => r.id !== id));
+    if (a === id) setA(null);
+    if (b === id) setB(null);
+    if (openId === id) setOpenId(null);
+  }
 
   async function toggleDetail(id: string) {
     if (openId === id) {
@@ -71,10 +89,11 @@ export function RunHistory({ runs }: { runs: Run[] }) {
               <th className="px-3 py-2">Results tab</th>
               <th className="px-3 py-2">Details</th>
               <th className="px-3 py-2">Compare</th>
+              {canDelete && <th className="px-3 py-2">Delete</th>}
             </tr>
           </thead>
           <tbody>
-            {runs.map((r) => (
+            {list.map((r) => (
               <Fragment key={r.id}>
                 <tr className="border-t border-line-light">
                   <td className="px-3 py-2 text-ink">{new Date(r.created_at).toLocaleString()}</td>
@@ -100,10 +119,21 @@ export function RunHistory({ runs }: { runs: Run[] }) {
                       {a === r.id ? "A" : b === r.id ? "B" : "pick"}
                     </button>
                   </td>
+                  {canDelete && (
+                    <td className="px-3 py-2">
+                      <button
+                        onClick={() => deleteRun(r.id)}
+                        disabled={deletingId === r.id}
+                        className="rounded border border-red-200 px-2 py-0.5 text-xs text-red-600 hover:bg-red-50 disabled:opacity-50"
+                      >
+                        {deletingId === r.id ? "Deleting…" : "Delete"}
+                      </button>
+                    </td>
+                  )}
                 </tr>
                 {openId === r.id && (
                   <tr className="bg-surface-secondary/50">
-                    <td colSpan={10} className="px-4 py-3">
+                    <td colSpan={canDelete ? 11 : 10} className="px-4 py-3">
                       <div className="grid gap-4 lg:grid-cols-2">
                         <div>
                           <h4 className="mb-1 text-xs font-semibold text-ink-secondary">Activity log</h4>

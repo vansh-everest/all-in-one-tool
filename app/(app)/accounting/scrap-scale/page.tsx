@@ -5,7 +5,8 @@ import { RunHistory } from "@/components/scrap-scale/RunHistory";
 import { createAdminClient } from "@/utils/supabase/admin";
 
 export default async function ScrapScalePage() {
-  const { user, department } = await requireDepartmentAccess("accounting");
+  const { user, department, role } = await requireDepartmentAccess("accounting");
+  const canDelete = role === "admin" || role === "super";
   const conn = await getConnection(user.id);
   const supabase = createAdminClient();
   const { data: runs } = await supabase
@@ -22,7 +23,7 @@ export default async function ScrapScalePage() {
         <p className="mb-6 text-sm text-gray-500">Reconcile payment screenshots against Total Fund Collection.</p>
         <ScrapScaleApp connected={!!conn} connectedEmail={conn?.google_email ?? null} />
       </div>
-      <RunHistory runs={runs ?? []} />
+      <RunHistory runs={runs ?? []} canDelete={canDelete} />
     </div>
   );
 }
