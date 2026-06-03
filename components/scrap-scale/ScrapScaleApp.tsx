@@ -2,7 +2,8 @@
 import { useState } from "react";
 import { ReconSummary, type Summary } from "./ReconSummary";
 import { ResultsTable, type ResultRow } from "./ResultsTable";
-import type { ColumnFilter, FilterOp } from "@/lib/scrap-scale/filters";
+import { FilterPanel } from "./FilterPanel";
+import type { ColumnFilter } from "@/lib/scrap-scale/filters";
 
 type Detection = {
   link: { index: number; header: string } | null;
@@ -31,13 +32,6 @@ async function readJson(res: Response): Promise<Record<string, unknown>> {
     return { error: text.slice(0, 300) };
   }
 }
-
-const FILTER_OPS: { value: FilterOp; label: string }[] = [
-  { value: "contains", label: "contains" },
-  { value: "equals", label: "equals" },
-  { value: "not_empty", label: "is not empty" },
-  { value: "empty", label: "is empty" },
-];
 
 type Payment = { amount: number; currency: string; txn_id: string | null; date: string | null };
 type TestFileResult = {
@@ -134,14 +128,17 @@ export function ScrapScaleApp({ connected, connectedEmail }: { connected: boolea
     doDetect(tab);
   }
 
-  function addFilter() {
-    setFilters((f) => [...f, { index: 0, op: "contains", value: "" }]);
-  }
-  function updateFilter(i: number, patch: Partial<ColumnFilter>) {
-    setFilters((f) => f.map((flt, idx) => (idx === i ? { ...flt, ...patch } : flt)));
-  }
-  function removeFilter(i: number) {
-    setFilters((f) => f.filter((_, idx) => idx !== i));
+  async function loadColumnValues(index: number) {
+    const res = await fetch("/api/tools/scrap-scale/column-values", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ spreadsheetId: detect!.spreadsheetId, sheetTab: sheetTab || detect!.sheetTab, index }),
+    });
+    const body = await readJson(res);
+    return {
+      values: (body.values as { value: string; count: number }[]) ?? [],
+      type: (body.type as "text" | "number" | "date") ?? "text",
+    };
   }
 
   async function doRun() {
@@ -344,55 +341,7 @@ export function ScrapScaleApp({ connected, connectedEmail }: { connected: boolea
             ))}
           </div>
           <div className="mt-4 border-t pt-4">
-            <div className="mb-2 flex items-center justify-between">
-              <span className="text-sm text-gray-600">Filters (optional) — only rows matching all filters are processed</span>
-              <button onClick={addFilter} className="rounded border px-2 py-0.5 text-xs text-gray-700 hover:bg-gray-50">
-                + Add filter
-              </button>
-            </div>
-            {filters.length === 0 && <p className="text-xs text-gray-400">No filters — all rows will be processed.</p>}
-            <div className="space-y-2">
-              {filters.map((f, i) => {
-                const valueless = f.op === "empty" || f.op === "not_empty";
-                return (
-                  <div key={i} className="flex flex-wrap items-center gap-2">
-                    <select
-                      value={f.index}
-                      onChange={(e) => updateFilter(i, { index: Number(e.target.value) })}
-                      className="rounded border px-2 py-1 text-sm text-gray-900"
-                    >
-                      {detect.headers.map((h, idx) => (
-                        <option key={idx} value={idx}>
-                          {h || `(col ${idx + 1})`}
-                        </option>
-                      ))}
-                    </select>
-                    <select
-                      value={f.op}
-                      onChange={(e) => updateFilter(i, { op: e.target.value as FilterOp })}
-                      className="rounded border px-2 py-1 text-sm text-gray-900"
-                    >
-                      {FILTER_OPS.map((o) => (
-                        <option key={o.value} value={o.value}>
-                          {o.label}
-                        </option>
-                      ))}
-                    </select>
-                    {!valueless && (
-                      <input
-                        value={f.value ?? ""}
-                        onChange={(e) => updateFilter(i, { value: e.target.value })}
-                        placeholder="value"
-                        className="rounded border px-2 py-1 text-sm text-gray-900"
-                      />
-                    )}
-                    <button onClick={() => removeFilter(i)} className="rounded px-2 py-1 text-xs text-red-600 hover:bg-red-50">
-                      Remove
-                    </button>
-                  </div>
-                );
-              })}
-            </div>
+            <FilterPanel headers={detect.headers} filters={filters} onChange={setFilters} loadValues={loadColumnValues} />
           </div>
 
           <div className="mt-4 flex items-center gap-3">
