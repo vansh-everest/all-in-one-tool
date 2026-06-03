@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createClient } from "@/utils/supabase/server";
+import { createAdminClient } from "@/utils/supabase/admin";
 import { requireAccounting } from "@/lib/scrap-scale/access";
 import { getAccessToken } from "@/lib/google/connection";
 import { SCRAP_SCALE_SCOPES } from "@/lib/google/scopes";
@@ -12,12 +12,12 @@ function tabName(d: Date): string {
 
 export async function POST(_req: NextRequest, { params }: { params: Promise<{ runId: string }> }) {
   const { runId } = await params;
-  const { departmentId } = await requireAccounting();
-  const supabase = await createClient();
+  const { userId } = await requireAccounting();
+  const supabase = createAdminClient();
   const { data: run } = await supabase.from("scrap_scale_runs").select("*").eq("id", runId).single();
   if (!run) return NextResponse.json({ error: "not found" }, { status: 404 });
 
-  const { accessToken } = await getAccessToken(departmentId, SCRAP_SCALE_SCOPES);
+  const { accessToken } = await getAccessToken(userId, SCRAP_SCALE_SCOPES);
 
   // Read the original tab; append 3 columns onto a copy written to a NEW tab.
   const original = await readValues(run.spreadsheet_id, run.sheet_title, accessToken);

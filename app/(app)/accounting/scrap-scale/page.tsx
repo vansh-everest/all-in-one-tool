@@ -2,12 +2,12 @@ import { requireDepartmentAccess } from "@/lib/auth/guards";
 import { getConnection } from "@/lib/google/connection";
 import { ScrapScaleApp } from "@/components/scrap-scale/ScrapScaleApp";
 import { RunHistory } from "@/components/scrap-scale/RunHistory";
-import { createClient } from "@/utils/supabase/server";
+import { createAdminClient } from "@/utils/supabase/admin";
 
 export default async function ScrapScalePage() {
-  const { department } = await requireDepartmentAccess("accounting");
-  const conn = await getConnection(department.id);
-  const supabase = await createClient();
+  const { user, department } = await requireDepartmentAccess("accounting");
+  const conn = await getConnection(user.id);
+  const supabase = createAdminClient();
   const { data: runs } = await supabase
     .from("scrap_scale_runs")
     .select("id, spreadsheet_id, sheet_title, status, total_rows, summary, results_tab_name, created_at")

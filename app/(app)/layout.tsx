@@ -1,5 +1,5 @@
 import { requireUser } from "@/lib/auth/guards";
-import { createClient } from "@/utils/supabase/server";
+import { createAdminClient } from "@/utils/supabase/admin";
 import { Sidebar } from "@/components/Sidebar";
 import { filterDepartmentsForUser } from "@/lib/auth/access";
 import type { DepartmentRow } from "@/lib/tools/types";
@@ -10,8 +10,8 @@ export default async function AppLayout({
   children: React.ReactNode;
 }) {
   const user = await requireUser();
-  const supabase = await createClient();
-  const { data: allDepts } = await supabase
+  const admin = createAdminClient();
+  const { data: allDepts } = await admin
     .from("departments")
     .select("id, slug, name, icon")
     .order("name");

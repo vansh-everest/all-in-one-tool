@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createClient } from "@/utils/supabase/server";
+import { createAdminClient } from "@/utils/supabase/admin";
 import { requireAccounting } from "@/lib/scrap-scale/access";
 import { getAccessToken, ReconsentRequired } from "@/lib/google/connection";
 import { SCRAP_SCALE_SCOPES } from "@/lib/google/scopes";
@@ -18,7 +18,7 @@ export async function POST(req: NextRequest) {
 
     let accessToken: string;
     try {
-      ({ accessToken } = await getAccessToken(departmentId, SCRAP_SCALE_SCOPES));
+      ({ accessToken } = await getAccessToken(userId, SCRAP_SCALE_SCOPES));
     } catch (e) {
       if (e instanceof ReconsentRequired) return NextResponse.json({ error: "reconsent_required" }, { status: 409 });
       throw e;
@@ -26,7 +26,7 @@ export async function POST(req: NextRequest) {
 
     const values = await readValues(spreadsheetId, sheetTab, accessToken);
     const dataRows = values.slice(1);
-    const supabase = await createClient();
+    const supabase = createAdminClient();
 
     // Keep each data row's original sheet position (1-based, excluding the
     // header) so write-back can line results back up with the source tab, then

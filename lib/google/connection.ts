@@ -1,4 +1,4 @@
-import { createClient } from "@/utils/supabase/server";
+import { createAdminClient } from "@/utils/supabase/admin";
 import { encryptToken, decryptToken } from "./crypto";
 import { refreshAccessToken } from "./oauth";
 import { hasAllScopes } from "./scopes";
@@ -12,55 +12,53 @@ export class ReconsentRequired extends Error {
 
 export type GoogleConnection = {
   id: string;
-  department_id: string;
+  clerk_user_id: string;
   google_email: string | null;
   scopes: string[];
 };
 
-export async function getConnection(departmentId: string): Promise<GoogleConnection | null> {
-  const supabase = await createClient();
-  const { data } = await supabase
+export async function getConnection(clerkUserId: string): Promise<GoogleConnection | null> {
+  const admin = createAdminClient();
+  const { data } = await admin
     .from("google_connections")
-    .select("id, department_id, google_email, scopes")
-    .eq("department_id", departmentId)
+    .select("id, clerk_user_id, google_email, scopes")
+    .eq("clerk_user_id", clerkUserId)
     .maybeSingle();
   return data ?? null;
 }
 
 export async function saveConnection(args: {
-  departmentId: string;
-  connectedBy: string;
+  clerkUserId: string;
   googleEmail: string | null;
   refreshToken: string;
   scopes: string[];
 }): Promise<void> {
-  const supabase = await createClient();
-  const { error } = await supabase.from("google_connections").upsert(
+  const admin = createAdminClient();
+  const { error } = await admin.from("google_connections").upsert(
     {
-      department_id: args.departmentId,
-      connected_by: args.connectedBy,
+      clerk_user_id: args.clerkUserId,
       google_email: args.googleEmail,
       refresh_token_encrypted: encryptToken(args.refreshToken),
       scopes: args.scopes,
       updated_at: new Date().toISOString(),
     },
-    { onConflict: "department_id" },
+    { onConflict: "clerk_user_id" },
   );
   if (error) throw error;
 }
 
 /** Mints a fresh access token from the stored refresh token. Throws ReconsentRequired if missing/insufficient scopes. */
 export async function getAccessToken(
-  departmentId: string,
+  clerkUserId: string,
   requiredScopes: string[],
 ): Promise<{ accessToken: string; scopes: string[] }> {
-  const supabase = await createClient();
-  const { data } = await supabase
+  const admin = createAdminClient();
+  const { data } = await admin
     .from("google_connections")
     .select("refresh_token_encrypted, scopes")
-    .eq("department_id", departmentId)
+    .eq("clerk_user_id", clerkUserId)
     .maybeSingle();
-  if (!data) throw new ReconsentRequired("No Google connection for this department");
+  if (!data) throw new ReconsentRequired("No Google connection for this user");
   if (!hasAllScopes(data.scopes ?? [], requiredScopes)) throw new ReconsentRequired("Missing required scopes");
 
   const refreshToken = decryptToken(data.refresh_token_encrypted);

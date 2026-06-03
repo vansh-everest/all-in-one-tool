@@ -1,5 +1,5 @@
 import { requireUser } from "@/lib/auth/guards";
-import { createClient } from "@/utils/supabase/server";
+import { createAdminClient } from "@/utils/supabase/admin";
 import { filterDepartmentsForUser, toolsForDepartment } from "@/lib/auth/access";
 import { TOOLS } from "@/lib/tools/registry";
 import { DepartmentCard } from "@/components/DepartmentCard";
@@ -7,8 +7,8 @@ import type { DepartmentRow } from "@/lib/tools/types";
 
 export default async function Dashboard() {
   const user = await requireUser();
-  const supabase = await createClient();
-  const { data: allDepts } = await supabase
+  const admin = createAdminClient();
+  const { data: allDepts } = await admin
     .from("departments")
     .select("id, slug, name, icon")
     .order("name");

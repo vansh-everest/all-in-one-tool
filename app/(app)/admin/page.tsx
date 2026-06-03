@@ -10,7 +10,7 @@ export default async function AdminPage() {
   const admin = createAdminClient();
   const { data: profiles } = await admin
     .from("profiles")
-    .select("id, email, full_name, is_super_admin")
+    .select("clerk_user_id, email, full_name, is_super_admin")
     .order("email");
   const { data: departments } = await admin
     .from("departments")

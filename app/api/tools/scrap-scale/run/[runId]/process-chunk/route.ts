@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createClient } from "@/utils/supabase/server";
+import { createAdminClient } from "@/utils/supabase/admin";
 import { requireAccounting } from "@/lib/scrap-scale/access";
 import { getAccessToken } from "@/lib/google/connection";
 import { SCRAP_SCALE_SCOPES } from "@/lib/google/scopes";
@@ -11,12 +11,12 @@ import { mapWithConcurrency } from "@/lib/scrap-scale/queue";
 const CHUNK = 8; // rows per invocation (keeps under serverless time limit)
 const CONCURRENCY = 5; // simultaneous OCR/Drive ops
 
-type SupabaseServer = Awaited<ReturnType<typeof createClient>>;
+type SupabaseServer = ReturnType<typeof createAdminClient>;
 
 export async function POST(req: NextRequest, { params }: { params: Promise<{ runId: string }> }) {
   const { runId } = await params;
-  const { departmentId } = await requireAccounting();
-  const supabase = await createClient();
+  const { departmentId, userId } = await requireAccounting();
+  const supabase = createAdminClient();
   const force = req.nextUrl.searchParams.get("force") === "1";
 
   const { data: run } = await supabase.from("scrap_scale_runs").select("*").eq("id", runId).single();
@@ -34,7 +34,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ run
     return await finalize(supabase, runId);
   }
 
-  const { accessToken } = await getAccessToken(departmentId, SCRAP_SCALE_SCOPES);
+  const { accessToken } = await getAccessToken(userId, SCRAP_SCALE_SCOPES);
 
   for (const row of pending) {
     // Expand each Drive link into the actual files to OCR (folders → children).

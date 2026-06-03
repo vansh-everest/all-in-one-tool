@@ -1,14 +1,13 @@
-import { NextRequest, NextResponse } from "next/server";
+import { NextResponse } from "next/server";
 import { randomBytes } from "node:crypto";
-import { requireDepartmentAccess } from "@/lib/auth/guards";
+import { requireUser } from "@/lib/auth/guards";
 import { buildConsentUrl } from "@/lib/google/oauth";
 import { SCRAP_SCALE_SCOPES } from "@/lib/google/scopes";
 
-export async function GET(req: NextRequest) {
-  const dept = req.nextUrl.searchParams.get("department") ?? "accounting";
-  await requireDepartmentAccess(dept); // redirects if not a member / super_admin
+export async function GET() {
+  const user = await requireUser(); // redirects if not signed in / not allowed
   const nonce = randomBytes(16).toString("hex");
-  const state = Buffer.from(JSON.stringify({ dept, nonce })).toString("base64url");
+  const state = Buffer.from(JSON.stringify({ uid: user.id, nonce })).toString("base64url");
 
   const url = buildConsentUrl(SCRAP_SCALE_SCOPES, state);
   const res = NextResponse.redirect(url);

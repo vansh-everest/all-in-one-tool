@@ -9,7 +9,7 @@ const MAX_FILES = 10; // diagnostic cap so a folder link can't run forever
 
 export async function POST(req: NextRequest) {
   try {
-    const { departmentId } = await requireAccounting();
+    const { userId } = await requireAccounting();
     const { url } = await req.json();
     const linkIds = parseDriveFileIds(String(url ?? ""));
     if (linkIds.length === 0) {
@@ -18,7 +18,7 @@ export async function POST(req: NextRequest) {
 
     let accessToken: string;
     try {
-      ({ accessToken } = await getAccessToken(departmentId, SCRAP_SCALE_SCOPES));
+      ({ accessToken } = await getAccessToken(userId, SCRAP_SCALE_SCOPES));
     } catch (e) {
       if (e instanceof ReconsentRequired) return NextResponse.json({ error: "reconsent_required" }, { status: 409 });
       throw e;

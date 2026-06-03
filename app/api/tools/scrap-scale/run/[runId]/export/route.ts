@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import ExcelJS from "exceljs";
-import { createClient } from "@/utils/supabase/server";
+import { createAdminClient } from "@/utils/supabase/admin";
 import { requireAccounting } from "@/lib/scrap-scale/access";
 
 const HEADERS = ["Row", "Submitted By", "Links", "Expected", "Extracted", "Difference", "Flag", "Duplicate", "Status"];
@@ -23,7 +23,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ runI
   const { runId } = await params;
   await requireAccounting();
   const format = req.nextUrl.searchParams.get("format") ?? "csv";
-  const supabase = await createClient();
+  const supabase = createAdminClient();
   const { data: rows } = await supabase
     .from("scrap_scale_run_rows")
     .select("*")
