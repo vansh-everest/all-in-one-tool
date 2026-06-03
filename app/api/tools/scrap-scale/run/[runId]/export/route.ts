@@ -2,10 +2,15 @@ import { NextRequest, NextResponse } from "next/server";
 import ExcelJS from "exceljs";
 import { createAdminClient } from "@/utils/supabase/admin";
 import { requireAccounting } from "@/lib/scrap-scale/access";
+import { breakdownString } from "@/lib/scrap-scale/breakdown";
 
-const HEADERS = ["Row", "Submitted By", "Links", "Expected", "Extracted", "Difference", "Flag", "Duplicate", "Status"];
+const HEADERS = ["Row", "Submitted By", "Links", "Expected", "Extracted", "Difference", "Flag", "Duplicate", "Status", "Breakdown"];
 
 function toRow(r: Record<string, unknown>): (string | number)[] {
+  const details = ((r.ocr_details as { name?: string; amount: number | null }[]) ?? []).map((d) => ({
+    name: d.name,
+    amount: d.amount,
+  }));
   return [
     r.row_index as number,
     (r.submitted_by as string) ?? "",
@@ -16,6 +21,7 @@ function toRow(r: Record<string, unknown>): (string | number)[] {
     r.flagged ? "FLAGGED" : "OK",
     r.duplicate ? "DUPLICATE" : "",
     r.status as string,
+    breakdownString(details),
   ];
 }
 

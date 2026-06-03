@@ -4,6 +4,7 @@ import { requireAccounting } from "@/lib/scrap-scale/access";
 import { getAccessToken } from "@/lib/google/connection";
 import { SCRAP_SCALE_SCOPES } from "@/lib/google/scopes";
 import { readValues, addResultsTab, writeValues } from "@/lib/google/sheets";
+import { breakdownString } from "@/lib/scrap-scale/breakdown";
 
 function tabName(d: Date): string {
   const p = (n: number) => String(n).padStart(2, "0");
@@ -23,15 +24,25 @@ export async function POST(_req: NextRequest, { params }: { params: Promise<{ ru
   const original = await readValues(run.spreadsheet_id, run.sheet_title, accessToken);
   const { data: rows } = await supabase
     .from("scrap_scale_run_rows")
-    .select("row_index, extracted_amount, difference, flagged")
+    .select("row_index, extracted_amount, difference, flagged, ocr_details")
     .eq("run_id", runId)
     .order("row_index");
   const byIndex = new Map((rows ?? []).map((r) => [r.row_index, r]));
 
   const out: (string | number | null)[][] = original.map((row, i) => {
-    if (i === 0) return [...row, "Extracted Values", "Difference", "Flag"];
+    if (i === 0) return [...row, "Extracted Values", "Difference", "Flag", "Breakdown"];
     const r = byIndex.get(i); // data row i corresponds to row_index i
-    return [...row, r?.extracted_amount ?? "", r?.difference ?? "", r?.flagged ? "FLAGGED" : "OK"];
+    const details = ((r?.ocr_details as { name?: string; amount: number | null }[]) ?? []).map((d) => ({
+      name: d.name,
+      amount: d.amount,
+    }));
+    return [
+      ...row,
+      r?.extracted_amount ?? "",
+      r?.difference ?? "",
+      r?.flagged ? "FLAGGED" : "OK",
+      breakdownString(details),
+    ];
   });
 
   const name = tabName(new Date());

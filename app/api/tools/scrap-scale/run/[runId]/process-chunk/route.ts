@@ -83,6 +83,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ run
         mimeType: f.mimeType,
         amount: f.amount,
         txn_ids: f.txn_ids,
+        payments: f.payments,
         readable: f.readable,
         error: f.error,
       })),

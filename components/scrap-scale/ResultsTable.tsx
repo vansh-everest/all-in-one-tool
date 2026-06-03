@@ -20,6 +20,7 @@ export type ResultRow = {
         amount: number | null;
         txn_ids?: string[];
         txn_id?: string | null;
+        payments?: { amount: number; txn_id: string | null }[];
         readable?: boolean;
         error?: string | null;
       }[]
@@ -73,11 +74,12 @@ export function ResultsTable({ rows }: { rows: ResultRow[] }) {
               <tr className="bg-gray-50">
                 <td colSpan={7} className="px-4 py-3">
                   <div className="flex flex-wrap gap-4">
-                    {(r.ocr_details ?? []).map((d) => {
+                    {(r.ocr_details ?? []).map((d, i) => {
                       const isImg = (d.mimeType ?? "").startsWith("image/");
                       const txns = d.txn_ids ?? (d.txn_id ? [d.txn_id] : []);
                       return (
                         <div key={d.file_id} className="w-48">
+                          <div className="mb-1 text-xs font-semibold text-gray-700">SS{i + 1}</div>
                           {isImg ? (
                             // eslint-disable-next-line @next/next/no-img-element
                             <img src={`/api/tools/scrap-scale/image?file=${d.file_id}`} alt={d.name ?? "screenshot"} className="rounded border" />
@@ -98,12 +100,35 @@ export function ResultsTable({ rows }: { rows: ResultRow[] }) {
                             amount: <b>{d.amount ?? "—"}</b>
                             {txns.length ? ` · txn ${txns.join(", ")}` : ""}
                           </div>
+                          {(d.payments?.length ?? 0) > 1 && (
+                            <ul className="mt-0.5 text-[11px] text-gray-500">
+                              {d.payments!.map((p, j) => (
+                                <li key={j}>
+                                  · ₹{p.amount.toLocaleString("en-IN")}
+                                  {p.txn_id ? ` (${p.txn_id})` : ""}
+                                </li>
+                              ))}
+                            </ul>
+                          )}
                           {d.error && <div className="text-xs text-red-600">{d.error}</div>}
                         </div>
                       );
                     })}
                     {(r.ocr_details ?? []).length === 0 && <span className="text-xs text-gray-500">No screenshots for this row.</span>}
                   </div>
+                  {(r.ocr_details ?? []).length > 0 && (
+                    <div className="mt-3 border-t pt-2 text-sm">
+                      <span className="text-gray-700">
+                        Total extracted: <b>₹{Number(r.extracted_amount ?? 0).toLocaleString("en-IN")}</b>
+                      </span>
+                      <span className="ml-4 text-gray-700">
+                        Tally vs expected ₹{Number(r.expected_amount ?? 0).toLocaleString("en-IN")}:{" "}
+                        <b className={Number(r.difference) !== 0 ? "text-red-600" : "text-green-700"}>
+                          Δ {Number(r.difference ?? 0).toLocaleString("en-IN")} {Number(r.difference) === 0 ? "OK" : "FLAG"}
+                        </b>
+                      </span>
+                    </div>
+                  )}
                 </td>
               </tr>
             )}
