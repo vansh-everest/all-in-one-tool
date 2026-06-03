@@ -7,6 +7,7 @@ import { resolveDriveFiles, extractOneFile, type FileExtraction } from "@/lib/sc
 import { computeRow, type OcrUnit } from "@/lib/scrap-scale/compute";
 import { markDuplicates } from "@/lib/scrap-scale/duplicates";
 import { mapWithConcurrency } from "@/lib/scrap-scale/queue";
+import { appendActivity } from "@/lib/scrap-scale/activity";
 
 const CHUNK = 8; // rows per invocation (keeps under serverless time limit)
 const CONCURRENCY = 5; // simultaneous OCR/Drive ops
@@ -154,5 +155,10 @@ async function finalize(supabase: SupabaseServer, runId: string) {
     sumExtracted: all.reduce((s, r) => s + (Number(r.extracted_amount) || 0), 0),
   };
   await supabase.from("scrap_scale_runs").update({ status: "done", summary }).eq("id", runId);
+  await appendActivity(
+    supabase,
+    runId,
+    `Processed ${all.length} rows — ${summary.reconciled} reconciled, ${summary.needsReview} need review, ${summary.flagged} flagged, ${summary.duplicates} duplicates; Σ ₹${summary.sumExtracted.toLocaleString("en-IN")}`,
+  );
   return NextResponse.json({ processed: all.length, total: all.length, subtotal: summary.sumExtracted, done: true, summary });
 }

@@ -39,6 +39,7 @@ export async function POST(req: NextRequest) {
       sheets: meta.sheets,
       headers,
       detection,
+      sample: values.slice(1, 11),
       rowCount: Math.max(values.length - 1, 0),
     });
   } catch (e) {

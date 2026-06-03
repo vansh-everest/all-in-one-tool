@@ -10,7 +10,7 @@ export default async function ScrapScalePage() {
   const supabase = createAdminClient();
   const { data: runs } = await supabase
     .from("scrap_scale_runs")
-    .select("id, spreadsheet_id, sheet_title, status, total_rows, summary, results_tab_name, created_at")
+    .select("id, spreadsheet_id, sheet_title, status, total_rows, summary, results_tab_name, created_at, created_by_email, activities")
     .eq("department_id", department.id)
     .order("created_at", { ascending: false })
     .limit(25);

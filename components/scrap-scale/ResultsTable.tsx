@@ -5,6 +5,7 @@ export type ResultRow = {
   id: string;
   row_index: number;
   submitted_by: string | null;
+  scrap_sold_date: string | null;
   links: string[];
   expected_amount: number | null;
   extracted_amount: number | null;
@@ -41,6 +42,7 @@ export function ResultsTable({ rows }: { rows: ResultRow[] }) {
         <tr className="text-left text-gray-500">
           <th className="px-2 py-2">#</th>
           <th className="px-2 py-2">Submitted by</th>
+          <th className="px-2 py-2">Scrap Sold Date</th>
           <th className="px-2 py-2">Expected</th>
           <th className="px-2 py-2">Extracted</th>
           <th className="px-2 py-2">Difference</th>
@@ -54,6 +56,7 @@ export function ResultsTable({ rows }: { rows: ResultRow[] }) {
             <tr className="border-t hover:bg-gray-50">
               <td className="px-2 py-2 text-gray-900">{r.row_index}</td>
               <td className="px-2 py-2 text-gray-900">{r.submitted_by ?? "—"}</td>
+              <td className="px-2 py-2 text-gray-900">{r.scrap_sold_date ?? "—"}</td>
               <td className="px-2 py-2 text-gray-900">{r.expected_amount ?? "—"}</td>
               <td className="px-2 py-2">
                 <button
@@ -72,7 +75,7 @@ export function ResultsTable({ rows }: { rows: ResultRow[] }) {
             </tr>
             {open === r.id && (
               <tr className="bg-gray-50">
-                <td colSpan={7} className="px-4 py-3">
+                <td colSpan={8} className="px-4 py-3">
                   <div className="flex flex-wrap gap-4">
                     {(r.ocr_details ?? []).map((d, i) => {
                       const isImg = (d.mimeType ?? "").startsWith("image/");

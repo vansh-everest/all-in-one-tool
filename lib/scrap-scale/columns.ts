@@ -9,6 +9,7 @@ export type ColumnDetection = {
   link: DetectedColumn | null;
   expected: DetectedColumn | null;
   name: DetectedColumn | null;
+  date: DetectedColumn | null;
   ambiguous: boolean;
   linkCandidates: number[];
   headers: string[];
@@ -17,6 +18,7 @@ export type ColumnDetection = {
 const LINK_KEY = "uploadtransactiondetails";
 const EXPECTED_KEY = "totalfundcollection";
 const NAME_KEYS = ["name", "submittedby", "fullname"];
+const DATE_KEY = "scrapsolddate";
 
 function colHasLinks(sample: string[][], index: number): boolean {
   return sample.some((row) => parseDriveFileIds(row[index] ?? "").length > 0);
@@ -27,6 +29,7 @@ export function detectColumns(headers: string[], sample: string[][]): ColumnDete
 
   const expectedIdx = norm.findIndex((h) => h.includes(EXPECTED_KEY));
   const nameIdx = norm.findIndex((h) => NAME_KEYS.some((k) => h.includes(k)));
+  const dateIdx = norm.findIndex((h) => h.includes(DATE_KEY));
 
   const linkHeaderMatches = norm.flatMap((h, i) => (h.includes(LINK_KEY) ? [i] : []));
   const linkWithData = linkHeaderMatches.filter((i) => colHasLinks(sample, i));
@@ -42,6 +45,7 @@ export function detectColumns(headers: string[], sample: string[][]): ColumnDete
     link,
     expected: expectedIdx >= 0 ? { index: expectedIdx, header: headers[expectedIdx] } : null,
     name: nameIdx >= 0 ? { index: nameIdx, header: headers[nameIdx] } : null,
+    date: dateIdx >= 0 ? { index: dateIdx, header: headers[dateIdx] } : null,
     ambiguous,
     linkCandidates: linkWithData.length > 1 ? linkWithData : linkHeaderMatches,
     headers,

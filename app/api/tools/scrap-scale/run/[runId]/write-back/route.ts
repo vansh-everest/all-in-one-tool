@@ -5,6 +5,7 @@ import { getAccessToken } from "@/lib/google/connection";
 import { SCRAP_SCALE_SCOPES } from "@/lib/google/scopes";
 import { readValues, addResultsTab, writeValues } from "@/lib/google/sheets";
 import { breakdownString } from "@/lib/scrap-scale/breakdown";
+import { appendActivity } from "@/lib/scrap-scale/activity";
 
 function tabName(d: Date): string {
   const p = (n: number) => String(n).padStart(2, "0");
@@ -49,6 +50,7 @@ export async function POST(_req: NextRequest, { params }: { params: Promise<{ ru
   await addResultsTab(run.spreadsheet_id, name, accessToken);
   await writeValues(run.spreadsheet_id, name, out, accessToken);
   await supabase.from("scrap_scale_runs").update({ results_tab_name: name }).eq("id", runId);
+  await appendActivity(supabase, runId, `Wrote results tab "${name}" to the sheet`);
 
   return NextResponse.json({ resultsTab: name });
 }

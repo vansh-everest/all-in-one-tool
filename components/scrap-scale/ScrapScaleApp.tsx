@@ -10,6 +10,7 @@ type Detection = {
   link: { index: number; header: string } | null;
   expected: { index: number; header: string } | null;
   name: { index: number; header: string } | null;
+  date: { index: number; header: string } | null;
   ambiguous: boolean;
   linkCandidates: number[];
   headers: string[];
@@ -20,6 +21,7 @@ type DetectResponse = {
   sheets: string[];
   headers: string[];
   detection: Detection;
+  sample: string[][];
   rowCount: number;
 };
 
@@ -34,31 +36,11 @@ async function readJson(res: Response): Promise<Record<string, unknown>> {
   }
 }
 
-type Payment = { amount: number; currency: string; txn_id: string | null; date: string | null };
-type TestFileResult = {
-  file_id: string;
-  name: string;
-  mimeType: string;
-  amount: number | null;
-  payments: Payment[];
-  txn_ids: string[];
-  readable: boolean;
-  error: string | null;
-  notes: string;
-};
-type TestLinkResponse = {
-  linkIds: string[];
-  fileCount: number;
-  truncated: boolean;
-  resolveErrors: { id: string; error: string }[];
-  results: TestFileResult[];
-};
-
 export function ScrapScaleApp({ connected, connectedEmail }: { connected: boolean; connectedEmail: string | null }) {
   const [url, setUrl] = useState("");
   const [detect, setDetect] = useState<DetectResponse | null>(null);
   const [sheetTab, setSheetTab] = useState<string>("");
-  const [cols, setCols] = useState<{ link: number; expected: number; name: number }>({ link: -1, expected: -1, name: -1 });
+  const [cols, setCols] = useState<{ link: number; expected: number; name: number; date: number }>({ link: -1, expected: -1, name: -1, date: -1 });
   const [filters, setFilters] = useState<ColumnFilter[]>([]);
   const [runId, setRunId] = useState<string | null>(null);
   const [progress, setProgress] = useState<{ processed: number; total: number; subtotal: number } | null>(null);
@@ -67,33 +49,6 @@ export function ScrapScaleApp({ connected, connectedEmail }: { connected: boolea
   const [sumExpected, setSumExpected] = useState(0);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-
-  const [testUrl, setTestUrl] = useState("");
-  const [testBusy, setTestBusy] = useState(false);
-  const [testResult, setTestResult] = useState<TestLinkResponse | null>(null);
-  const [testError, setTestError] = useState<string | null>(null);
-
-  async function doTestLink() {
-    setTestError(null);
-    setTestResult(null);
-    setTestBusy(true);
-    const res = await fetch("/api/tools/scrap-scale/test-link", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ url: testUrl }),
-    });
-    setTestBusy(false);
-    if (res.status === 409) {
-      setTestError("Google access missing — sign out and sign in again to grant Sheets/Drive.");
-      return;
-    }
-    const body = await readJson(res);
-    if (!res.ok) {
-      setTestError((body.error as string) ?? "Test failed");
-      return;
-    }
-    setTestResult(body as unknown as TestLinkResponse);
-  }
 
   async function doDetect(tab?: string) {
     setError(null);
@@ -121,6 +76,7 @@ export function ScrapScaleApp({ connected, connectedEmail }: { connected: boolea
       link: d.detection.link?.index ?? -1,
       expected: d.detection.expected?.index ?? -1,
       name: d.detection.name?.index ?? -1,
+      date: d.detection.date?.index ?? -1,
     });
   }
 
@@ -158,9 +114,10 @@ export function ScrapScaleApp({ connected, connectedEmail }: { connected: boolea
         spreadsheetId: detect.spreadsheetId,
         sheetTab: sheetTab || detect.sheetTab,
         columns: {
-          link: { index: cols.link },
-          expected: cols.expected >= 0 ? { index: cols.expected } : null,
-          name: cols.name >= 0 ? { index: cols.name } : null,
+          link: { index: cols.link, header: detect.headers[cols.link] },
+          expected: cols.expected >= 0 ? { index: cols.expected, header: detect.headers[cols.expected] } : null,
+          name: cols.name >= 0 ? { index: cols.name, header: detect.headers[cols.name] } : null,
+          date: cols.date >= 0 ? { index: cols.date, header: detect.headers[cols.date] } : null,
         },
         filters,
       }),
@@ -207,14 +164,14 @@ export function ScrapScaleApp({ connected, connectedEmail }: { connected: boolea
 
   if (!connected) {
     return (
-      <div className="rounded-xl border bg-white p-8">
+      <div className="rounded-2xl border border-line bg-surface p-8 shadow-cal">
         <p className="mb-1 text-sm text-gray-700">Google Sheets/Drive access isn&apos;t granted yet.</p>
         <p className="mb-4 text-sm text-gray-600">
           Sign out and sign back in with Google — the sign-in now asks for Sheets/Drive permission, so
           there&apos;s no separate connect step.
         </p>
         <SignOutButton>
-          <button className="inline-block rounded-md bg-gray-900 px-4 py-2 text-sm text-white">
+          <button className="inline-block rounded-lg bg-ink px-4 py-2 text-sm font-medium text-white">
             Sign out &amp; sign back in
           </button>
         </SignOutButton>
@@ -233,72 +190,16 @@ export function ScrapScaleApp({ connected, connectedEmail }: { connected: boolea
           value={url}
           onChange={(e) => setUrl(e.target.value)}
           placeholder="Paste Google Sheet URL"
-          className="flex-1 rounded-md border px-3 py-2 text-sm text-gray-900"
+          className="flex-1 rounded-lg border border-line px-3 py-2 text-sm text-gray-900"
         />
-        <button onClick={() => doDetect()} disabled={busy || !url} className="rounded-md bg-gray-900 px-4 py-2 text-sm text-white disabled:opacity-50">
+        <button onClick={() => doDetect()} disabled={busy || !url} className="rounded-lg bg-ink px-4 py-2 text-sm font-medium text-white disabled:opacity-50">
           Detect columns
         </button>
       </div>
       {error && <p className="text-sm text-red-600">{error}</p>}
 
-      <details className="rounded-xl border bg-white p-4">
-        <summary className="cursor-pointer text-sm font-medium text-gray-700">
-          Test a Drive link (diagnose extraction)
-        </summary>
-        <p className="mt-2 text-xs text-gray-500">
-          Paste a single Drive link (or a cell&apos;s contents) to see exactly which files are found and what Gemini reads
-          — images, PDFs, multi-page files, and folders are all supported. Skips the cache.
-        </p>
-        <div className="mt-3 flex gap-2">
-          <input
-            value={testUrl}
-            onChange={(e) => setTestUrl(e.target.value)}
-            placeholder="Paste a Google Drive link"
-            className="flex-1 rounded-md border px-3 py-2 text-sm text-gray-900"
-          />
-          <button
-            onClick={doTestLink}
-            disabled={testBusy || !testUrl}
-            className="rounded-md bg-gray-900 px-4 py-2 text-sm text-white disabled:opacity-50"
-          >
-            {testBusy ? "Testing…" : "Test"}
-          </button>
-        </div>
-        {testError && <p className="mt-2 text-sm text-red-600">{testError}</p>}
-        {testResult && (
-          <div className="mt-3 space-y-2 text-sm">
-            <p className="text-gray-600">
-              Found <b>{testResult.fileCount}</b> file{testResult.fileCount === 1 ? "" : "s"}
-              {testResult.truncated ? " (showing first 10)" : ""} from {testResult.linkIds.length} link(s).
-            </p>
-            {testResult.resolveErrors.map((e) => (
-              <p key={e.id} className="text-red-600">
-                Could not open <code>{e.id}</code>: {e.error}
-              </p>
-            ))}
-            {testResult.results.map((r) => (
-              <div key={r.file_id} className="rounded border p-2">
-                <div className="flex items-center justify-between">
-                  <span className="font-medium text-gray-900">{r.name}</span>
-                  <span className="text-xs text-gray-400">{r.mimeType}</span>
-                </div>
-                {r.readable ? (
-                  <div className="text-gray-700">
-                    amount: <b>₹{(r.amount ?? 0).toLocaleString("en-IN")}</b>
-                    {r.payments.length > 1 ? ` (${r.payments.length} payments)` : ""}
-                    {r.txn_ids.length ? ` · txn ${r.txn_ids.join(", ")}` : ""}
-                  </div>
-                ) : (
-                  <div className="text-red-600">{r.error ?? "Could not read amount"}</div>
-                )}
-              </div>
-            ))}
-          </div>
-        )}
-      </details>
-
       {detect && (
-        <div className="rounded-xl border bg-white p-4">
+        <div className="rounded-2xl border border-line bg-surface p-4 shadow-cal">
           {detect.sheets.length > 1 && (
             <label className="mb-4 block text-sm">
               <span className="mb-1 block text-gray-600">Sheet / tab</span>
@@ -319,16 +220,22 @@ export function ScrapScaleApp({ connected, connectedEmail }: { connected: boolea
           {detect.detection.ambiguous && (
             <p className="mb-2 text-sm text-amber-700">Two link columns matched — pick the correct one below.</p>
           )}
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-            {(["link", "expected", "name"] as const).map((field) => (
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-4">
+            {(["link", "expected", "name", "date"] as const).map((field) => (
               <label key={field} className="text-sm">
-                <span className="mb-1 block text-gray-600">
-                  {field === "link" ? "Link column" : field === "expected" ? "Total Fund Collection" : "Name (optional)"}
+                <span className="mb-1 block text-ink-secondary">
+                  {field === "link"
+                    ? "Link column"
+                    : field === "expected"
+                      ? "Total Fund Collection"
+                      : field === "name"
+                        ? "Name (optional)"
+                        : "Scrap Sold Date"}
                 </span>
                 <select
                   value={cols[field]}
                   onChange={(e) => setCols({ ...cols, [field]: Number(e.target.value) })}
-                  className="w-full rounded border px-2 py-1 text-gray-900"
+                  className="w-full rounded-lg border border-line px-2 py-1.5 text-gray-900"
                 >
                   <option value={-1}>—</option>
                   {detect.headers.map((h, i) => (
@@ -340,12 +247,18 @@ export function ScrapScaleApp({ connected, connectedEmail }: { connected: boolea
               </label>
             ))}
           </div>
-          <div className="mt-4 border-t pt-4">
-            <FilterPanel headers={detect.headers} filters={filters} onChange={setFilters} loadValues={loadColumnValues} />
+          <div className="mt-4 border-t border-line-light pt-4">
+            <FilterPanel
+              headers={detect.headers}
+              sample={detect.sample}
+              filters={filters}
+              onChange={setFilters}
+              loadValues={loadColumnValues}
+            />
           </div>
 
           <div className="mt-4 flex items-center gap-3">
-            <button onClick={doRun} disabled={busy || cols.link < 0} className="rounded-md bg-indigo-600 px-4 py-2 text-sm text-white disabled:opacity-50">
+            <button onClick={doRun} disabled={busy || cols.link < 0} className="rounded-lg bg-brand px-4 py-2 text-sm font-medium text-white disabled:opacity-50">
               Run ({detect.rowCount} rows{filters.length ? ", filtered" : ""})
             </button>
             {progress && (
@@ -366,21 +279,21 @@ export function ScrapScaleApp({ connected, connectedEmail }: { connected: boolea
         <>
           <ReconSummary summary={summary} sumExpected={sumExpected} />
           <div className="flex flex-wrap gap-2">
-            <button onClick={writeBack} disabled={busy} className="rounded-md bg-gray-900 px-3 py-2 text-sm text-white disabled:opacity-50">
+            <button onClick={writeBack} disabled={busy} className="rounded-lg bg-ink px-3 py-2 text-sm font-medium text-white disabled:opacity-50">
               Write results tab to sheet
             </button>
             {runId && (
-              <a href={`/api/tools/scrap-scale/run/${runId}/export?format=csv`} className="rounded-md border px-3 py-2 text-sm">
+              <a href={`/api/tools/scrap-scale/run/${runId}/export?format=csv`} className="rounded-lg border border-line bg-surface px-3 py-2 text-sm hover:bg-surface-secondary">
                 Download CSV
               </a>
             )}
             {runId && (
-              <a href={`/api/tools/scrap-scale/run/${runId}/export?format=xlsx`} className="rounded-md border px-3 py-2 text-sm">
+              <a href={`/api/tools/scrap-scale/run/${runId}/export?format=xlsx`} className="rounded-lg border border-line bg-surface px-3 py-2 text-sm hover:bg-surface-secondary">
                 Download Excel
               </a>
             )}
           </div>
-          <div className="overflow-x-auto rounded-xl border bg-white p-2">
+          <div className="overflow-x-auto rounded-2xl border border-line bg-surface p-2 shadow-cal">
             <ResultsTable rows={rows} />
           </div>
         </>

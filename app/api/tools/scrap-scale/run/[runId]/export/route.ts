@@ -3,8 +3,9 @@ import ExcelJS from "exceljs";
 import { createAdminClient } from "@/utils/supabase/admin";
 import { requireAccounting } from "@/lib/scrap-scale/access";
 import { breakdownString } from "@/lib/scrap-scale/breakdown";
+import { appendActivity } from "@/lib/scrap-scale/activity";
 
-const HEADERS = ["Row", "Submitted By", "Links", "Expected", "Extracted", "Difference", "Flag", "Duplicate", "Status", "Breakdown"];
+const HEADERS = ["Row", "Submitted By", "Scrap Sold Date", "Links", "Expected", "Extracted", "Difference", "Flag", "Duplicate", "Status", "Breakdown"];
 
 function toRow(r: Record<string, unknown>): (string | number)[] {
   const details = ((r.ocr_details as { name?: string; amount: number | null }[]) ?? []).map((d) => ({
@@ -14,6 +15,7 @@ function toRow(r: Record<string, unknown>): (string | number)[] {
   return [
     r.row_index as number,
     (r.submitted_by as string) ?? "",
+    (r.scrap_sold_date as string) ?? "",
     ((r.links as string[]) ?? []).join(" | "),
     Number(r.expected_amount ?? 0),
     Number(r.extracted_amount ?? 0),
@@ -36,6 +38,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ runI
     .eq("run_id", runId)
     .order("row_index");
   const data = (rows ?? []).map(toRow);
+  await appendActivity(supabase, runId, `Exported ${format === "xlsx" ? "Excel" : "CSV"} (${data.length} rows)`);
 
   if (format === "xlsx") {
     const wb = new ExcelJS.Workbook();
