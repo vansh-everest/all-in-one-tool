@@ -1,16 +1,13 @@
-// Seeds the 5 departments and the super_admin account.
+// Seeds the 5 departments. Users self-provision via Google sign-in (Clerk);
+// super-admin is granted by SUPER_ADMIN_EMAILS on first login — no user seeding here.
 // Usage: node --env-file=.env.local supabase/seed.mjs
 import { createClient } from "@supabase/supabase-js";
 
 const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
-const email = process.env.SEED_SUPER_ADMIN_EMAIL;
-const password = process.env.SEED_SUPER_ADMIN_PASSWORD;
 
-if (!url || !serviceKey || !email || !password) {
-  console.error(
-    "Missing env: NEXT_PUBLIC_SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, SEED_SUPER_ADMIN_EMAIL, SEED_SUPER_ADMIN_PASSWORD",
-  );
+if (!url || !serviceKey) {
+  console.error("Missing env: NEXT_PUBLIC_SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY");
   process.exit(1);
 }
 
@@ -27,38 +24,9 @@ const DEPARTMENTS = [
 ];
 
 async function main() {
-  const { error: deptErr } = await admin
-    .from("departments")
-    .upsert(DEPARTMENTS, { onConflict: "slug" });
-  if (deptErr) throw deptErr;
+  const { error } = await admin.from("departments").upsert(DEPARTMENTS, { onConflict: "slug" });
+  if (error) throw error;
   console.log(`Upserted ${DEPARTMENTS.length} departments.`);
-
-  let userId;
-  const { data: created, error: createErr } = await admin.auth.admin.createUser({
-    email,
-    password,
-    email_confirm: true,
-    user_metadata: { full_name: "Super Admin" },
-  });
-  if (createErr) {
-    if (!/already|registered|exists/i.test(createErr.message)) throw createErr;
-    const { data: list } = await admin.auth.admin.listUsers();
-    userId = list.users.find((u) => u.email === email)?.id;
-    console.log("Super admin already exists; reusing.");
-  } else {
-    userId = created.user.id;
-    console.log("Created super admin auth user.");
-  }
-  if (!userId) throw new Error("Could not resolve super admin user id.");
-
-  const { error: profErr } = await admin
-    .from("profiles")
-    .upsert(
-      { id: userId, email, full_name: "Super Admin", is_super_admin: true },
-      { onConflict: "id" },
-    );
-  if (profErr) throw profErr;
-  console.log("Flagged super admin profile.");
 }
 
 main()

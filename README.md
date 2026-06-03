@@ -8,8 +8,8 @@ registry, and an admin page. The first tool, **Scrap Scale** (Accounting), is cu
 ## Stack
 
 - **Next.js 16** (App Router, TypeScript) — server components + server actions
-- **Supabase** (Postgres) with **Row Level Security** on every table
-- **Supabase Auth** (email/password) via `@supabase/ssr` cookie sessions
+- **Clerk** authentication — Google sign-in only, restricted to `@everestfleet.in` / `@everestfleet.com`
+- **Supabase** (Postgres) — all access via the service-role client; authorization enforced in server guards
 - **Tailwind CSS v4**
 
 ## Prerequisites
@@ -23,63 +23,64 @@ Copy `.env.example` to `.env.local` and fill in:
 
 | Variable | Used by | Notes |
 | --- | --- | --- |
-| `NEXT_PUBLIC_SUPABASE_URL` | app + scripts | Supabase project URL |
-| `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` | app (browser + SSR) | Replaces the legacy anon key; RLS-scoped |
-| `SUPABASE_SERVICE_ROLE_KEY` | seed + admin actions | **Server only.** Bypasses RLS. Never exposed to the client |
-| `DIRECT_URL` | `migrate.mjs`, `seed.mjs` | Postgres connection string (session-mode pooler). Migrations/seed only |
-| `SEED_SUPER_ADMIN_EMAIL` | `seed.mjs` | Initial super_admin email |
-| `SEED_SUPER_ADMIN_PASSWORD` | `seed.mjs` | Initial super_admin password (change after first login) |
+| `NEXT_PUBLIC_SUPABASE_URL` | app | Supabase project URL |
+| `SUPABASE_SERVICE_ROLE_KEY` | app (server) | **Server only.** All DB access. Never exposed to the client |
+| `DIRECT_URL` | `migrate.mjs` | Postgres connection string (session-mode pooler). Migrations only |
+| `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY` | app (browser) | Clerk publishable key |
+| `CLERK_SECRET_KEY` | app (server) | Clerk secret key |
+| `SUPER_ADMIN_EMAILS` | server guards | Comma-separated; flagged super-admin on first login |
+| `ALLOWED_EMAIL_DOMAINS` | server guards | Comma-separated allowed sign-in domains |
+| `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` / `GOOGLE_REDIRECT_URI` | per-user Google connect | OAuth web client (Internal consent) |
+| `TOKEN_ENCRYPTION_KEY` | app (server) | 32-byte base64; encrypts stored Google refresh tokens. Keep stable across deploys |
+| `GEMINI_API_KEY` (+ `_2`, `_3`, or `GEMINI_API_KEYS`) | OCR | Key pool; rotates on rate limits |
+| `GEMINI_MODEL` | OCR | Default `gemini-2.5-flash` |
 
-`.env.local` is gitignored. The service-role key and DB password must never be committed or shipped
-to the client bundle.
+`.env.local` is gitignored. The service-role key, Clerk secret, and Google/Gemini keys must never be
+committed or shipped to the client bundle.
 
 ## Setup
 
 ```bash
 npm install
 
-# 1. Apply database migrations (tables, RLS, trigger, helper functions)
+# 1. Apply database migrations (schema + Clerk re-key in 0004)
 node --env-file=.env.local supabase/migrate.mjs
 
-# 2. Seed the 5 departments + the super_admin
+# 2. Seed the 5 departments (no users — they self-provision via Google sign-in)
 node --env-file=.env.local supabase/seed.mjs
 
 # 3. Run
 npm run dev          # http://localhost:3000
-npm test             # unit tests for access logic
+npm test             # unit tests
 npm run build        # production build + typecheck
 ```
 
-After seeding, sign in at `/sign-in` with `SEED_SUPER_ADMIN_EMAIL` / `SEED_SUPER_ADMIN_PASSWORD`.
+### Clerk setup (one-time)
 
-### Disable public sign-ups (important)
-
-Accounts are created **only by admins** (see below). There is no `/sign-up` route. To prevent any
-self-registration via the Supabase API, also turn **off** "Allow new users to sign up" in the
-Supabase dashboard → Authentication → Providers → Email.
+1. Create a Clerk application; enable **Google** as the only social connection.
+2. Clerk Dashboard → **Restrictions**: allowlist `everestfleet.in` and `everestfleet.com`.
+3. Add `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY` + `CLERK_SECRET_KEY` to `.env.local` (and Vercel).
+4. The first person whose email is in `SUPER_ADMIN_EMAILS` becomes super-admin on sign-in.
 
 ## How access control works
 
-Access is enforced in **two layers**:
+There is **no Supabase session** — Clerk owns identity, and the app reads/writes the DB exclusively
+with the **service-role** client. Authorization lives in **server guards**:
 
-1. **RLS (database).** Every table has policies. To avoid policy recursion, the policies call three
-   `SECURITY DEFINER` helper functions defined in `supabase/migrations/0001_init.sql`:
-   `is_super_admin(uid)`, `is_member_of(dept, uid)`, `is_dept_admin(dept, uid)`. A user can only read
-   departments/memberships tied to departments they belong to; super_admin bypasses everything.
-2. **Server route guards.** `lib/auth/guards.ts` (`requireUser`, `requireDepartmentAccess`) resolve
-   the user server-side and redirect if they lack membership. The `proxy.ts` (Next.js 16's renamed
-   middleware) redirects unauthenticated requests to `/sign-in` and refreshes the session cookie.
+- `lib/auth/guards.ts` (`requireUser`, `requireDepartmentAccess`) resolve the Clerk user, reject email
+  domains outside `ALLOWED_EMAIL_DOMAINS` (→ `/not-allowed`), lazy-provision a `profiles` row keyed by
+  the Clerk user id, and check the `memberships` table.
+- `proxy.ts` runs `clerkMiddleware()`; unauthenticated users are redirected to `/sign-in`.
+- RLS stays enabled as a backstop (the service role bypasses it; no `auth.uid()` policies remain).
 
-Roles: a membership is `admin` or `member` per department. `profiles.is_super_admin` grants global
-access. The `/admin` page is super_admin-only in v1.
+Roles: a membership is `admin` or `member` per department. `profiles.is_super_admin` (derived from
+`SUPER_ADMIN_EMAILS`) grants global access. The `/admin` page is super-admin-only.
 
-## Admin-only user creation
+## Users & access
 
-1. Sign in as a super_admin → **Admin** in the sidebar (`/admin`).
-2. **Add user**: enter email + full name. The server creates the Supabase Auth user (via the
-   service-role admin API, `email_confirm: true`) and displays a **one-time temp password** — hand it
-   to the user; they sign in and change it.
-3. **Memberships**: the grid assigns each user `member`/`admin`/none per department; changes save on
+1. Staff sign in with their `@everestfleet.in` / `@everestfleet.com` Google account — they appear in
+   `/admin` automatically (no manual user creation).
+2. A super-admin assigns each person `member`/`admin`/none per department in the grid; changes save on
    selection.
 
 New users see an empty dashboard until granted department access.
@@ -111,24 +112,25 @@ Tools are declared in one place; pages derive everything from the registry.
 
 ```
 app/
-  sign-in/                  # public sign-in (outside the authed group)
+  layout.tsx                # root; wraps <ClerkProvider>
+  sign-in/[[...sign-in]]/   # Clerk <SignIn> (outside the authed group)
+  not-allowed/              # rejected email domain
   (app)/                    # authed shell (sidebar); route group, no URL segment
-    layout.tsx              # requires session; renders sidebar
+    layout.tsx              # requires Clerk user; renders sidebar
     page.tsx                # dashboard (department cards, filtered)
     [department]/page.tsx   # tool list for a department
     [department]/[tool]/    # generic tool page (renders stub in v1)
-    admin/                  # super_admin: users + memberships
-  account/actions.ts        # sign out / change password
+    admin/                  # super-admin: assign roles to signed-in users
 lib/
-  auth/guards.ts            # server guards
+  auth/guards.ts            # Clerk auth + service-role + lazy provisioning
   auth/access.ts            # pure, unit-tested access logic
   tools/registry.ts         # the tool registry
-utils/supabase/             # server / client / proxy / admin clients
+utils/supabase/admin.ts     # service-role client (sole DB client)
 supabase/
-  migrations/0001_init.sql  # schema + RLS
+  migrations/               # 0001 schema → 0004 Clerk re-key
   migrate.mjs               # applies migrations via DIRECT_URL
-  seed.mjs                  # departments + super_admin
-proxy.ts                    # Next.js 16 middleware (auth redirect + session refresh)
+  seed.mjs                  # departments only
+proxy.ts                    # Next.js 16 proxy = clerkMiddleware()
 ```
 
 ## Scrap Scale (Accounting)
@@ -139,44 +141,47 @@ tab — leaving the original tab untouched.
 
 ### Google connection (reusable module)
 
-Scrap Scale (and future Google-backed tools) authenticate via **user-delegated OAuth** — no
-service-account keys. The OAuth consent screen is **Internal** to the everestfleet.in Workspace, so
-any org user can consent to the scopes without Google app verification.
+Scrap Scale authenticates via **per-user delegated OAuth** — no service-account keys. The OAuth
+consent screen is **Internal** to the Everest Workspace, so any org user can consent without Google
+app verification.
 
 - **Scopes:** `https://www.googleapis.com/auth/spreadsheets` (read + write, to add the results tab) and
   `https://www.googleapis.com/auth/drive.readonly` (to download the screenshots). Defined once in
   `lib/google/scopes.ts`.
-- **Connect:** on the Scrap Scale page click **Connect Google** and consent with an account that has
-  access to the source sheet **and** the Drive folder holding the screenshots (a dedicated internal
-  account is recommended). The **refresh token** is encrypted at rest (AES-256-GCM via
-  `TOKEN_ENCRYPTION_KEY`) in `google_connections`, scoped by RLS to the Accounting department. Access
-  tokens are minted server-side per run and never reach the browser.
+- **Connect:** each user clicks **Connect Google** once and consents as themselves. The tool then
+  reads exactly what that user can access — if they can open the sheet/Drive link, the tool can too.
+  Their **refresh token** is encrypted at rest (AES-256-GCM via `TOKEN_ENCRYPTION_KEY`) in
+  `google_connections`, keyed by their Clerk user id. Access tokens are minted server-side per run and
+  never reach the browser.
 - If the stored token is missing required scopes, the tool returns `reconsent_required` (409) and the
   UI prompts **Reconnect**.
 
 ### Usage
 
-1. **Connect Google** (once).
-2. Paste the **Google Sheet URL** → **Detect columns**. The tool fuzzy-matches the link column
-   (≈ "Upload Transaction Details") and the expected-amount column (≈ "Total Fund Collection"); if two
-   link columns match it picks the one that actually contains Drive links, else asks you to choose.
-   You can **override** any column before running.
-3. **Run** → a chunked, resumable job downloads each screenshot, OCRs it with Gemini Flash, sums valid
-   amounts per row, and shows live progress + a running subtotal. OCR results are cached by Drive file
-   id, so re-runs are fast and within free-tier limits.
-4. Review the **reconciliation summary** + **results table** (click an extracted value to see the
-   source screenshot(s) and what OCR read). Strict flagging: a row is flagged if the rounded difference
-   is not exactly 0.00. Duplicate transaction ids are flagged across rows; rows with no Drive link are
-   "note rows" excluded from the math.
-5. **Write results tab to sheet** → adds a `ScrapScale <date> <time>` tab with the original rows plus
-   `Extracted Values`, `Difference`, `Flag` columns. The source tab is never modified.
-6. **Download CSV / Excel**, and use **Run history** to review past runs and compare two side by side.
+1. **Connect Google** (once, per user).
+2. Paste the **Google Sheet URL** → **Detect columns**. Pick the **sheet/tab** if there are several.
+   The tool fuzzy-matches the link and "Total Fund Collection" columns; override any column before
+   running. Use **"Test a Drive link"** to see exactly what Gemini reads for one link (bypasses cache).
+3. **Filter** (optional) with the Google-Sheets-style panel — *filter by values* (distinct-value
+   checklist) or *by condition* (text / number / **date** before-after-between). Only matching rows run.
+4. **Run** → a chunked, resumable job resolves each Drive link (folders expand to their files),
+   downloads **images and PDFs** (multi-page supported), OCRs them with Gemini Flash (**rotating across
+   the key pool on rate limits**), sums every payment per row, and shows live progress. OCR is cached
+   by Drive file id.
+5. Review the **summary** + **results table**. Click an extracted value to see each screenshot as
+   **SS1/SS2/…** with per-payment amounts, the **total**, and the **tally vs expected**. Strict
+   flagging: flagged when the rounded difference ≠ 0.00. Duplicate txn ids flagged across rows; rows
+   with no Drive link are "note rows".
+6. **Write results tab** → a `ScrapScale <date> <time>` tab with `Extracted Values`, `Difference`,
+   `Flag`, and a per-screenshot **Breakdown** column. The source tab is never modified.
+7. **Download CSV / Excel** (incl. Breakdown), and use **Run history** to compare two runs.
 
 ### Env vars
 
-`GEMINI_API_KEY`, `GEMINI_MODEL` (default `gemini-2.5-flash`), `GOOGLE_CLIENT_ID`,
-`GOOGLE_CLIENT_SECRET`, `GOOGLE_REDIRECT_URI` (`…/api/google/oauth/callback`), `TOKEN_ENCRYPTION_KEY`
-(32-byte base64). See `.env.example`.
+`GEMINI_API_KEY` (+ optional `GEMINI_API_KEY_2`/`_3` or comma-separated `GEMINI_API_KEYS` for rate-limit
+rotation), `GEMINI_MODEL` (default `gemini-2.5-flash`), `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`,
+`GOOGLE_REDIRECT_URI` (`…/api/google/oauth/callback`), `TOKEN_ENCRYPTION_KEY` (32-byte base64). See
+`.env.example`.
 
 ## Security note
 
