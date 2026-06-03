@@ -1,7 +1,5 @@
-import { createAdminClient } from "@/utils/supabase/admin";
-import { encryptToken, decryptToken } from "./crypto";
-import { refreshAccessToken } from "./oauth";
-import { hasAllScopes } from "./scopes";
+import { clerkClient } from "@clerk/nextjs/server";
+import { hasAllScopes, SCRAP_SCALE_SCOPES } from "./scopes";
 
 export class ReconsentRequired extends Error {
   constructor(msg = "Google re-consent required") {
@@ -11,57 +9,50 @@ export class ReconsentRequired extends Error {
 }
 
 export type GoogleConnection = {
-  id: string;
   clerk_user_id: string;
   google_email: string | null;
   scopes: string[];
 };
 
+const RECONSENT_MSG =
+  "Your sign-in doesn't include Google Sheets/Drive access yet. Sign out and sign in again with Google to grant it.";
+
+/** The Google OAuth token Clerk holds for this user (from their Google sign-in), or null. */
+async function getGoogleToken(clerkUserId: string): Promise<{ token: string; scopes: string[] } | null> {
+  const client = await clerkClient();
+  try {
+    const res = await client.users.getUserOauthAccessToken(clerkUserId, "google");
+    const t = res.data?.[0];
+    if (!t?.token) return null;
+    return { token: t.token, scopes: t.scopes ?? [] };
+  } catch {
+    return null;
+  }
+}
+
+/** Connection status for the UI: present only when the Google sign-in granted the Scrap Scale scopes. */
 export async function getConnection(clerkUserId: string): Promise<GoogleConnection | null> {
-  const admin = createAdminClient();
-  const { data } = await admin
-    .from("google_connections")
-    .select("id, clerk_user_id, google_email, scopes")
-    .eq("clerk_user_id", clerkUserId)
-    .maybeSingle();
-  return data ?? null;
+  const tok = await getGoogleToken(clerkUserId);
+  if (!tok || !hasAllScopes(tok.scopes, SCRAP_SCALE_SCOPES)) return null;
+
+  const client = await clerkClient();
+  const user = await client.users.getUser(clerkUserId);
+  const google = user.externalAccounts?.find((a) => a.provider === "google" || a.provider === "oauth_google");
+  const email = google?.emailAddress ?? user.primaryEmailAddress?.emailAddress ?? null;
+  return { clerk_user_id: clerkUserId, google_email: email, scopes: tok.scopes };
 }
 
-export async function saveConnection(args: {
-  clerkUserId: string;
-  googleEmail: string | null;
-  refreshToken: string;
-  scopes: string[];
-}): Promise<void> {
-  const admin = createAdminClient();
-  const { error } = await admin.from("google_connections").upsert(
-    {
-      clerk_user_id: args.clerkUserId,
-      google_email: args.googleEmail,
-      refresh_token_encrypted: encryptToken(args.refreshToken),
-      scopes: args.scopes,
-      updated_at: new Date().toISOString(),
-    },
-    { onConflict: "clerk_user_id" },
-  );
-  if (error) throw error;
-}
-
-/** Mints a fresh access token from the stored refresh token. Throws ReconsentRequired if missing/insufficient scopes. */
+/**
+ * The user's Google access token (minted/refreshed by Clerk from their sign-in).
+ * Throws ReconsentRequired if Google isn't connected or lacks the required scopes —
+ * the remedy is to sign out and sign in again, granting Sheets/Drive.
+ */
 export async function getAccessToken(
   clerkUserId: string,
   requiredScopes: string[],
 ): Promise<{ accessToken: string; scopes: string[] }> {
-  const admin = createAdminClient();
-  const { data } = await admin
-    .from("google_connections")
-    .select("refresh_token_encrypted, scopes")
-    .eq("clerk_user_id", clerkUserId)
-    .maybeSingle();
-  if (!data) throw new ReconsentRequired("No Google connection for this user");
-  if (!hasAllScopes(data.scopes ?? [], requiredScopes)) throw new ReconsentRequired("Missing required scopes");
-
-  const refreshToken = decryptToken(data.refresh_token_encrypted);
-  const token = await refreshAccessToken(refreshToken);
-  return { accessToken: token.access_token, scopes: (token.scope ?? "").split(" ").filter(Boolean) };
+  const tok = await getGoogleToken(clerkUserId);
+  if (!tok) throw new ReconsentRequired(RECONSENT_MSG);
+  if (!hasAllScopes(tok.scopes, requiredScopes)) throw new ReconsentRequired(RECONSENT_MSG);
+  return { accessToken: tok.token, scopes: tok.scopes };
 }

@@ -1,5 +1,6 @@
 "use client";
 import { useState } from "react";
+import { SignOutButton } from "@clerk/nextjs";
 import { ReconSummary, type Summary } from "./ReconSummary";
 import { ResultsTable, type ResultRow } from "./ResultsTable";
 import { FilterPanel } from "./FilterPanel";
@@ -83,7 +84,7 @@ export function ScrapScaleApp({ connected, connectedEmail }: { connected: boolea
     });
     setTestBusy(false);
     if (res.status === 409) {
-      setTestError("Google access needs re-consent. Click Reconnect above.");
+      setTestError("Google access missing — sign out and sign in again to grant Sheets/Drive.");
       return;
     }
     const body = await readJson(res);
@@ -104,7 +105,7 @@ export function ScrapScaleApp({ connected, connectedEmail }: { connected: boolea
     });
     setBusy(false);
     if (res.status === 409) {
-      setError("Google access needs re-consent. Click Reconnect.");
+      setError("Google access missing — sign out and sign in again to grant Sheets/Drive.");
       return;
     }
     const body = await readJson(res);
@@ -207,25 +208,24 @@ export function ScrapScaleApp({ connected, connectedEmail }: { connected: boolea
   if (!connected) {
     return (
       <div className="rounded-xl border bg-white p-8">
+        <p className="mb-1 text-sm text-gray-700">Google Sheets/Drive access isn&apos;t granted yet.</p>
         <p className="mb-4 text-sm text-gray-600">
-          Connect a Google account (with access to the source sheet + Drive) to use Scrap Scale.
+          Sign out and sign back in with Google — the sign-in now asks for Sheets/Drive permission, so
+          there&apos;s no separate connect step.
         </p>
-        {/* eslint-disable-next-line @next/next/no-html-link-for-pages -- full navigation to an OAuth redirect endpoint, not a page */}
-        <a href="/api/google/oauth/start?department=accounting" className="inline-block rounded-md bg-gray-900 px-4 py-2 text-sm text-white">
-          Connect Google
-        </a>
+        <SignOutButton>
+          <button className="inline-block rounded-md bg-gray-900 px-4 py-2 text-sm text-white">
+            Sign out &amp; sign back in
+          </button>
+        </SignOutButton>
       </div>
     );
   }
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between text-xs text-gray-500">
-        <span>Connected as {connectedEmail ?? "Google account"}</span>
-        {/* eslint-disable-next-line @next/next/no-html-link-for-pages -- full navigation to an OAuth redirect endpoint, not a page */}
-        <a href="/api/google/oauth/start?department=accounting" className="text-indigo-600 hover:underline">
-          Reconnect
-        </a>
+      <div className="text-xs text-gray-500">
+        <span>Using Google access for {connectedEmail ?? "your account"}</span>
       </div>
 
       <div className="flex gap-2">
