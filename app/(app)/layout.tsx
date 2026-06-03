@@ -21,13 +21,13 @@ export default async function AppLayout({
     user.isSuperAdmin,
   );
   return (
-    <div className="flex min-h-screen bg-gray-50">
+    <div className="flex min-h-screen bg-background">
       <Sidebar
         departments={visible}
         email={user.email}
         isSuperAdmin={user.isSuperAdmin}
       />
-      <main className="flex-1 p-8">{children}</main>
+      <main className="mx-auto w-full max-w-6xl flex-1 p-8">{children}</main>
     </div>
   );
 }
