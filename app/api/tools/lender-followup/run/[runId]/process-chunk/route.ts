@@ -42,13 +42,17 @@ export async function POST(_req: Request, { params }: { params: Promise<{ runId:
     const lenders = (lendersData ?? []) as Lender[];
 
     let foundThreads = 0;
+    let emailsExamined = 0;
     const newItems: Record<string, unknown>[] = [];
+    // Per-run record of every matched thread (reliable per run, unlike the shared cache).
+    const matches: Record<string, unknown>[] = [];
 
     for (const lender of lenders) {
       try {
         const query = buildLenderQuery(lender);
         if (!query) continue;
         const refs = await withRetry(() => searchMessageRefs(accessToken, query, SEARCH_MAX));
+        emailsExamined += refs.length;
 
         // One message per thread (newest first from search), so we don't extract a thread twice.
         const seen = new Set<string>();
@@ -81,7 +85,7 @@ export async function POST(_req: Request, { params }: { params: Promise<{ runId:
               },
               { onConflict: "department_id,message_id" },
             );
-            return ext.items.map((it) => ({
+            const tasks = ext.items.map((it) => ({
               run_id: runId,
               lender_id: lender.id,
               lender_name: lender.name,
@@ -94,12 +98,23 @@ export async function POST(_req: Request, { params }: { params: Promise<{ runId:
               thread_id: ref.threadId,
               email_date: full.internalDate,
             }));
+            const match = {
+              message_id: ref.id,
+              lender_id: lender.id,
+              lender_name: lender.name,
+              owner: lender.owner ?? null,
+              subject: full.subject,
+              email_date: full.internalDate,
+              items: ext.items.map((it) => it.item),
+            };
+            return { tasks, match };
           } catch {
             // One thread failing (rate limit, parse, Gmail) must not fail the whole scan.
-            return [] as Record<string, unknown>[];
+            return { tasks: [] as Record<string, unknown>[], match: null as Record<string, unknown> | null };
           }
         });
-        const lenderTasks = perThread.flat();
+        const lenderTasks = perThread.flatMap((p) => p.tasks);
+        for (const p of perThread) if (p.match) matches.push(p.match);
         for (const t of lenderTasks) newItems.push(t);
 
         // Add the found tasks to the editable grid (lender_items), skipping ones already present.
@@ -144,11 +159,14 @@ export async function POST(_req: Request, { params }: { params: Promise<{ runId:
       ...(run.counts ?? {}),
       matched: (run.counts?.matched ?? 0) + foundThreads,
       open_items: (run.counts?.open_items ?? 0) + newItems.length,
+      emails_examined: (run.counts?.emails_examined ?? 0) + emailsExamined,
     };
-    await db.from("lender_runs").update({ cursor: newCursor, counts }).eq("id", runId);
+    const prevMatches: Record<string, unknown>[] = Array.isArray(run.summary?.matches) ? run.summary.matches : [];
+    const summary = { ...(run.summary ?? {}), matches: [...prevMatches, ...matches] };
+    await db.from("lender_runs").update({ cursor: newCursor, counts, summary }).eq("id", runId);
 
     if (newCursor >= worklist.length) return finalize(db, runId, worklist.length);
-    return NextResponse.json({ processed: newCursor, total: worklist.length, matched: counts.matched, queued: 0, done: false });
+    return NextResponse.json({ processed: newCursor, total: worklist.length, matched: counts.matched, emailsExamined: counts.emails_examined, queued: 0, done: false });
   } catch (e) {
     const message = e instanceof Error ? e.message : "Processing error";
     return NextResponse.json({ error: message }, { status: 500 });
@@ -160,8 +178,9 @@ async function finalize(db: DB, runId: string, total: number) {
   const lendersWithItems = new Set((items ?? []).map((r) => r.lender_id)).size;
   const openItems = (items ?? []).length;
   const { data: run } = await db.from("lender_runs").select("counts").eq("id", runId).single();
+  const matched = run?.counts?.matched ?? 0;
   const counts = { ...(run?.counts ?? {}), lenders_with_items: lendersWithItems, open_items: openItems, queued: 0 };
   await db.from("lender_runs").update({ status: "done", counts }).eq("id", runId);
-  await appendLenderActivity(db, runId, `Done — ${openItems} undone tasks found across ${lendersWithItems} lenders`);
-  return NextResponse.json({ processed: total, total, matched: counts.matched ?? 0, queued: 0, done: true });
+  await appendLenderActivity(db, runId, `Done — ${matched} matched threads, ${openItems} tasks across ${lendersWithItems} lenders`);
+  return NextResponse.json({ processed: total, total, matched, queued: 0, done: true });
 }

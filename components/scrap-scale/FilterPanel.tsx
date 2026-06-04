@@ -46,6 +46,8 @@ export function FilterPanel({
   const [mode, setMode] = useState<"sheet" | "manual">("sheet");
   const [valueCache, setValueCache] = useState<Record<number, ColumnValues>>({});
   const [openCol, setOpenCol] = useState<number | null>(null);
+  const [colSearch, setColSearch] = useState<Record<number, string>>({});
+  const [colSort, setColSort] = useState<Record<number, "az" | "za">>({});
 
   async function ensureValues(index: number) {
     if (valueCache[index]) return;
@@ -133,29 +135,48 @@ export function FilterPanel({
                           ▾
                         </button>
                       </div>
-                      {openCol === i && (
-                        <div className="absolute left-0 z-20 mt-1 max-h-64 w-56 overflow-y-auto rounded-lg border border-line bg-surface p-2 shadow-cal-lg">
-                          <div className="mb-1 flex items-center justify-between">
-                            <button className="text-[11px] text-brand hover:underline" onClick={() => setValues(i, [])}>
-                              Clear
-                            </button>
-                            <button className="text-[11px] text-ink-tertiary hover:underline" onClick={() => setOpenCol(null)}>
-                              Done
-                            </button>
+                      {openCol === i && (() => {
+                        const all = valueCache[i]?.values ?? [];
+                        const sort = colSort[i] ?? "az";
+                        const q = (colSearch[i] ?? "").toLowerCase();
+                        const shown = all
+                          .filter(({ value }) => !q || (value || "(blank)").toLowerCase().includes(q))
+                          .slice()
+                          .sort((a, b) => (sort === "az" ? a.value.localeCompare(b.value) : b.value.localeCompare(a.value)));
+                        const sel = valuesFilter(i)?.values ?? [];
+                        return (
+                          <div className="absolute left-0 z-20 mt-1 w-64 rounded-lg border border-line bg-surface p-2 text-ink shadow-cal-lg">
+                            <div className="mb-1 flex items-center gap-2 text-[11px]">
+                              <button className={`rounded px-1 ${sort === "az" ? "bg-brand text-white" : "hover:bg-line"}`} onClick={() => setColSort((s) => ({ ...s, [i]: "az" }))}>A→Z</button>
+                              <button className={`rounded px-1 ${sort === "za" ? "bg-brand text-white" : "hover:bg-line"}`} onClick={() => setColSort((s) => ({ ...s, [i]: "za" }))}>Z→A</button>
+                              <button className="ml-auto text-ink-tertiary hover:underline" onClick={() => setOpenCol(null)}>Done</button>
+                            </div>
+                            <input
+                              value={colSearch[i] ?? ""}
+                              onChange={(e) => setColSearch((s) => ({ ...s, [i]: e.target.value }))}
+                              placeholder="Search values…"
+                              className="mb-1 w-full rounded border border-line px-2 py-1 text-[12px] text-gray-900"
+                            />
+                            <div className="mb-1 flex items-center justify-between text-[11px]">
+                              <button className="text-brand hover:underline" onClick={() => setValues(i, [...new Set([...sel, ...shown.map((v) => v.value)])])}>
+                                Select all{q ? " (shown)" : ""}
+                              </button>
+                              <button className="text-ink-tertiary hover:underline" onClick={() => setValues(i, [])}>Clear</button>
+                            </div>
+                            <div className="max-h-48 overflow-y-auto">
+                              {!valueCache[i] && <p className="text-[11px] text-ink-tertiary">Loading…</p>}
+                              {valueCache[i] && shown.length === 0 && <p className="text-[11px] text-ink-tertiary">No matches.</p>}
+                              {shown.map(({ value, count }) => (
+                                <label key={value} className="flex items-center gap-2 py-0.5 text-[12px] text-ink">
+                                  <input type="checkbox" checked={sel.includes(value)} onChange={() => toggleValue(i, value)} />
+                                  <span className="truncate">{value || "(blank)"}</span>
+                                  <span className="ml-auto text-[11px] text-ink-tertiary">{count}</span>
+                                </label>
+                              ))}
+                            </div>
                           </div>
-                          {!valueCache[i] && <p className="text-[11px] text-ink-tertiary">Loading…</p>}
-                          {(valueCache[i]?.values ?? []).map(({ value, count }) => {
-                            const checked = valuesFilter(i)?.values.includes(value) ?? false;
-                            return (
-                              <label key={value} className="flex items-center gap-2 py-0.5 text-[12px] text-ink">
-                                <input type="checkbox" checked={checked} onChange={() => toggleValue(i, value)} />
-                                <span className="truncate">{value || "(blank)"}</span>
-                                <span className="ml-auto text-[11px] text-ink-tertiary">{count}</span>
-                              </label>
-                            );
-                          })}
-                        </div>
-                      )}
+                        );
+                      })()}
                     </th>
                   );
                 })}

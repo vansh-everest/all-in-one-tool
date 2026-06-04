@@ -20,7 +20,7 @@ export function LenderFollowupApp({
   connectedEmail: string | null;
   grid: UnifiedGrid;
 }) {
-  const [progress, setProgress] = useState<{ processed: number; total: number; matched: number } | null>(null);
+  const [progress, setProgress] = useState<{ processed: number; total: number; matched: number; examined: number } | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [ownerFilter, setOwnerFilter] = useState<string>("");
@@ -43,7 +43,7 @@ export function LenderFollowupApp({
       return;
     }
     const { runId: id, total } = await res.json();
-    setProgress({ processed: 0, total, matched: 0 });
+    setProgress({ processed: 0, total, matched: 0, examined: 0 });
     let done = false;
     let failed = false;
     while (!done) {
@@ -55,7 +55,7 @@ export function LenderFollowupApp({
         break;
       }
       const p = await cr.json();
-      setProgress({ processed: p.processed, total: p.total, matched: p.matched });
+      setProgress({ processed: p.processed, total: p.total, matched: p.matched, examined: p.emailsExamined ?? 0 });
       done = p.done;
     }
     setBusy(false);
@@ -129,7 +129,7 @@ export function LenderFollowupApp({
         </button>
         {progress && (
           <span className="text-sm text-gray-600">
-            {progress.processed}/{progress.total} lenders scanned · {progress.matched} threads matched
+            {progress.processed}/{progress.total} lenders · {progress.examined} emails examined · {progress.matched} threads matched
           </span>
         )}
       </div>
