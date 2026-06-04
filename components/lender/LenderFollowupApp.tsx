@@ -3,6 +3,7 @@ import { useState } from "react";
 import { SignOutButton } from "@clerk/nextjs";
 import type { UnifiedGrid } from "@/lib/lender/types";
 import { LenderSheetGrid } from "./LenderSheetGrid";
+import { LenderFindings } from "./LenderFindings";
 
 const PRIVACY =
   "The scan searches unread mail for each lender's name / domain / known senders, and only those matching threads are read in full and sent to Gemini to extract pending tasks. All other unread mail is never opened or sent anywhere. Email is never marked read.";
@@ -154,6 +155,8 @@ export function LenderFollowupApp({
           <a href={`${EXPORT_PATH}?format=xlsx`} className="rounded-lg border border-line bg-surface px-3 py-1.5 text-sm hover:bg-surface-secondary">Excel</a>
         </div>
       </div>
+
+      <LenderFindings findings={grid.findings} />
 
       <LenderSheetGrid grid={grid} ownerFilter={ownerFilter} />
       <p className="text-xs text-ink-tertiary">

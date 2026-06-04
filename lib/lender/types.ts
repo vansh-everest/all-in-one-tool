@@ -62,7 +62,20 @@ export type GridItem = {
   last_update_date: string | null;
   direction: Direction;
   source_message_id: string | null; // present for email-found items
+  email_date: string | null;        // the source email's date (ISO), for email items
+  subject: string | null;           // the source email's subject, for email items
   source: GridItemSource;
+};
+
+/** One found email thread surfaced as a review card after a scan. */
+export type Finding = {
+  lender_id: string | null;
+  lender_name: string;
+  owner: string | null;
+  subject: string;
+  email_date: string | null;
+  source_message_id: string | null;
+  items: string[];
 };
 
 export type GridColumn = {
@@ -75,6 +88,7 @@ export type GridColumn = {
 export type UnifiedGrid = {
   columns: GridColumn[];
   counts: { lenders_with_items: number; open_items: number; sheet_items: number; email_items: number };
+  findings: Finding[];
 };
 
 // Stored on the imported run (summary.grid): the sheet's lender columns + their items in order.

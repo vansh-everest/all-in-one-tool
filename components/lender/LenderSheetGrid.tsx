@@ -52,15 +52,20 @@ export function LenderSheetGrid({ grid, ownerFilter }: { grid: UnifiedGrid; owne
                   >
                     <span className="whitespace-pre-wrap text-ink">{it.text}</span>
                     {it.status && <span className="ml-1 rounded bg-surface-secondary px-1 text-[10px] text-ink-secondary">{it.status}</span>}
-                    {email && it.source_message_id && (
-                      <a
-                        href={`/api/tools/lender-followup/message/${it.source_message_id}`}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="ml-1 text-[10px] text-brand hover:underline"
-                      >
-                        ✉ mail
-                      </a>
+                    {email && (
+                      <span className="mt-0.5 block text-[10px] text-ink-tertiary">
+                        {it.email_date && <span suppressHydrationWarning>📅 {new Date(it.email_date).toLocaleDateString()} </span>}
+                        {it.source_message_id && (
+                          <a
+                            href={`/api/tools/lender-followup/message/${it.source_message_id}`}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="text-brand hover:underline"
+                          >
+                            ✉ view mail
+                          </a>
+                        )}
+                      </span>
                     )}
                   </td>
                 );

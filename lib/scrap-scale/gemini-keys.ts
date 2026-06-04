@@ -15,6 +15,8 @@ export function parseGeminiKeys(env: Env = process.env): string[] {
   push(env.GEMINI_API_KEY);
   push(env.GEMINI_API_KEY_2);
   push(env.GEMINI_API_KEY_3);
+  push(env.GEMINI_API_KEY_4);
+  push(env.GEMINI_API_KEY_5);
   if (out.length === 0) {
     throw new Error("No Gemini API key configured (set GEMINI_API_KEY or GEMINI_API_KEYS).");
   }
