@@ -189,3 +189,21 @@ Rotate the Supabase service-role key and the database password if they were ever
 secret manager. Keep both strictly in `.env.local` locally and in Vercel's server-side env in
 production. The Google `TOKEN_ENCRYPTION_KEY` must be stable across deploys (rotating it invalidates
 stored refresh tokens — users would re-consent).
+
+## Lender Follow-up Tracker (Finance)
+
+Reads UNREAD Gmail and tracks open pending items per lender. **Emails are never marked read** —
+the tool uses only the `https://www.googleapis.com/auth/gmail.readonly` scope.
+
+**One-time setup:** add `gmail.readonly` to the Google connection in the Clerk dashboard, then sign
+out and sign in again to re-consent. Run `node --env-file=.env.local supabase/apply-0006.mjs` and
+`node --env-file=.env.local supabase/seed.mjs`.
+
+**Matching (deterministic → AI → human):** each unread email is matched to a lender by sender domain
+or known sender email. Confident misses can be classified on demand by Gemini (the "Classify queue"
+button). Remaining emails go to a "Needs assignment" queue; assigning one **teaches** the matcher by
+appending that sender to the lender's known senders, and "Not a lender" suppresses that sender from
+future runs.
+
+**Privacy:** only full content of matched-lender emails is fetched and sent to Gemini; all other
+unread mail stays metadata-only.
