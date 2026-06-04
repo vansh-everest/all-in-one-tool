@@ -57,15 +57,12 @@ export type RunCounts = {
 export type GridItemSource = "sheet" | "email" | "manual";
 
 export type GridItem = {
+  id: string | null;                // lender_items row id — every cell is editable
   text: string;
-  status: string;
-  last_update_date: string | null;
-  direction: Direction;
+  done: boolean;
+  source: GridItemSource;
   source_message_id: string | null; // present for email-found items
   email_date: string | null;        // the source email's date (ISO), for email items
-  subject: string | null;           // the source email's subject, for email items
-  manual_id: string | null;         // row id for manually-added items (editable/deletable)
-  source: GridItemSource;
 };
 
 /** One found email thread surfaced as a review card after a scan. */
@@ -88,7 +85,7 @@ export type GridColumn = {
 
 export type UnifiedGrid = {
   columns: GridColumn[];
-  counts: { lenders_with_items: number; open_items: number; sheet_items: number; email_items: number };
+  counts: { lenders_with_items: number; open_items: number; sheet_items: number; email_items: number; done: number };
   findings: Finding[];
 };
 

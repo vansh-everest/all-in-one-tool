@@ -22,15 +22,15 @@ export function trackerToRows(tracker: TrackerLender[]): string[][] {
   return rows;
 }
 
-export const GRID_EXPORT_HEADERS = ["Lender", "Owner", "Item", "Source", "Email Date", "Status"];
+export const GRID_EXPORT_HEADERS = ["Lender", "Owner", "Item", "Source", "Email Date", "Done"];
 
-/** One row per grid item, tagged with its origin (sheet vs email) and the source email date. */
+/** One row per grid item, tagged with its origin (sheet/email/manual) and the source email date. */
 export function gridToRows(grid: UnifiedGrid): string[][] {
   const rows: string[][] = [];
   for (const col of grid.columns) {
     for (const it of col.items) {
       const emailDate = it.email_date ? new Date(it.email_date).toISOString().slice(0, 10) : "";
-      rows.push([col.name, col.owner ?? "", it.text, it.source, emailDate, it.status]);
+      rows.push([col.name, col.owner ?? "", it.text, it.source, emailDate, it.done ? "done" : ""]);
     }
   }
   return rows;

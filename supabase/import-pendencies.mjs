@@ -98,16 +98,19 @@ async function main() {
     }
   }
 
+  // Replace sheet-sourced editable items with this import.
+  await db.from("lender_items").delete().eq("department_id", departmentId).eq("source", "sheet");
   const itemRows = parsed.items
-    .map((it) => {
+    .map((it, idx) => {
       const l = byNorm.get(normalizeLenderName(it.lenderName));
       if (!l) return null;
-      return {
-        lender_id: l.id, lender_name: l.name, owner: l.owner ?? null, item: it.item,
-        status: "", last_update_date: null, direction: "unclear", source_message_id: "", thread_id: null,
-      };
+      return { department_id: departmentId, lender_id: l.id, position: idx, text: it.item, source: "sheet" };
     })
     .filter(Boolean);
+  for (let i = 0; i < itemRows.length; i += 500) {
+    const { error } = await db.from("lender_items").insert(itemRows.slice(i, i + 500));
+    if (error) throw error;
+  }
 
   const lendersWithItems = new Set(itemRows.map((r) => r.lender_id)).size;
   const counts = { unread_total: 0, matched: 0, queued: 0, lenders_with_items: lendersWithItems, open_items: itemRows.length };
@@ -131,11 +134,6 @@ async function main() {
     })
     .select("id").single();
   if (runErr) throw runErr;
-
-  for (let i = 0; i < itemRows.length; i += 500) {
-    const { error } = await db.from("lender_run_items").insert(itemRows.slice(i, i + 500).map((r) => ({ ...r, run_id: run.id })));
-    if (error) throw error;
-  }
 
   console.log(`Lenders: ${parsed.lenders.length} parsed (${created} created, ${updated} owners updated).`);
   console.log(`Items: ${itemRows.length} across ${lendersWithItems} lenders. Imported run: ${run.id}`);

@@ -1,72 +1,96 @@
 "use client";
 import { useState } from "react";
-import type { UnifiedGrid } from "@/lib/lender/types";
+import type { GridColumn, GridItem, UnifiedGrid } from "@/lib/lender/types";
 
-async function deleteManual(id: string) {
-  if (!confirm("Delete this manually-added task?")) return;
-  const res = await fetch(`/api/tools/lender-followup/manual/${id}`, { method: "DELETE" });
-  if (res.ok) window.location.reload();
-  else alert((await res.json().catch(() => ({}))).error ?? "Delete failed");
-}
-
-async function patchManual(id: string, item: string) {
-  await fetch(`/api/tools/lender-followup/manual/${id}`, {
-    method: "PATCH",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ item }),
+async function api(path: string, method: string, body?: unknown) {
+  const res = await fetch(path, {
+    method,
+    headers: body ? { "Content-Type": "application/json" } : undefined,
+    body: body ? JSON.stringify(body) : undefined,
   });
+  return res;
 }
 
-/** Editable cell for a manually-added item: saves on blur, with a delete control. */
-function ManualCell({ id, text }: { id: string; text: string }) {
-  const [val, setVal] = useState(text);
+/** A single editable cell — text saves on blur, done toggles, and it can be deleted. */
+function Cell({ item, onChange, onDelete }: { item: GridItem; onChange: (patch: Partial<GridItem>) => void; onDelete: () => void }) {
+  const [text, setText] = useState(item.text);
+  const email = item.source === "email";
+  const manual = item.source === "manual";
+  const bg = item.done ? "bg-green-50" : email ? "bg-amber-50" : manual ? "bg-sky-50" : "bg-surface";
   return (
-    <div className="flex items-start gap-1">
-      <textarea
-        value={val}
-        onChange={(e) => setVal(e.target.value)}
-        onBlur={() => val.trim() && val !== text && patchManual(id, val.trim())}
-        rows={Math.max(1, Math.ceil(val.length / 30))}
-        className="w-full resize-y rounded border border-sky-200 bg-white px-1 py-0.5 text-xs text-ink"
-      />
-      <button onClick={() => deleteManual(id)} className="shrink-0 text-[11px] text-red-500 hover:text-red-700" title="Delete">✕</button>
-    </div>
+    <td className={`border border-line-light px-1 py-1 align-top ${bg}`} style={{ minWidth: 210, maxWidth: 340 }}>
+      <div className="flex items-start gap-1">
+        <input
+          type="checkbox"
+          checked={item.done}
+          title="Mark done"
+          onChange={(e) => { onChange({ done: e.target.checked }); if (item.id) api(`/api/tools/lender-followup/item/${item.id}`, "PATCH", { done: e.target.checked }); }}
+          className="mt-1"
+        />
+        <textarea
+          value={text}
+          onChange={(e) => setText(e.target.value)}
+          onBlur={() => {
+            const t = text.trim();
+            if (item.id && t !== item.text) { onChange({ text: t }); api(`/api/tools/lender-followup/item/${item.id}`, "PATCH", { text: t }); }
+          }}
+          rows={Math.max(1, Math.ceil((text.length || 1) / 32))}
+          className={`w-full resize-y rounded border border-transparent bg-transparent px-1 py-0.5 text-xs text-ink hover:border-line focus:border-brand focus:bg-white focus:outline-none ${item.done ? "text-ink-tertiary line-through" : ""}`}
+        />
+        <button onClick={() => { if (item.id) { api(`/api/tools/lender-followup/item/${item.id}`, "DELETE"); onDelete(); } }} className="shrink-0 text-[11px] text-red-400 hover:text-red-600" title="Delete">✕</button>
+      </div>
+      {email && (
+        <div className="pl-5 text-[10px] text-ink-tertiary">
+          {item.email_date && <span suppressHydrationWarning>📅 {new Date(item.email_date).toLocaleDateString()} </span>}
+          {item.source_message_id && (
+            <a href={`/api/tools/lender-followup/message/${item.source_message_id}`} target="_blank" rel="noreferrer" className="text-brand hover:underline">✉ mail</a>
+          )}
+        </div>
+      )}
+    </td>
   );
 }
 
 /**
- * Renders the unified tracker as a Google-Sheets-style matrix: lenders are columns
- * (owner band + name band header, like the source sheet), each column lists its pending
- * items down the rows. Email-found items are amber + link to their mail; manual items are
- * editable (sky-tinted) with a delete control.
+ * Google-Sheets-style editable matrix: lenders are columns (owner band + name band header).
+ * Every cell is editable like a spreadsheet — type to edit (saves on blur), check to mark
+ * done, ✕ to delete, and "+" at the bottom of a column to add a row. Email-found cells are
+ * amber (with date + mail link), manual cells sky, done cells green.
  */
 export function LenderSheetGrid({ grid, ownerFilter }: { grid: UnifiedGrid; ownerFilter: string }) {
-  const columns = grid.columns.filter((c) => !ownerFilter || c.owner === ownerFilter);
-  if (!columns.length) return <p className="text-sm text-ink-tertiary">No lender pendencies yet — import the sheet or run an email scan.</p>;
+  const [cols, setCols] = useState<GridColumn[]>(grid.columns);
 
-  const maxRows = Math.max(1, ...columns.map((c) => c.items.length));
+  const update = (lenderKey: string | null, fn: (items: GridItem[]) => GridItem[]) =>
+    setCols((cur) => cur.map((c) => (c.lender_id === lenderKey ? { ...c, items: fn(c.items) } : c)));
+
+  async function addRow(col: GridColumn) {
+    if (!col.lender_id) return;
+    const res = await api("/api/tools/lender-followup/item", "POST", { lenderId: col.lender_id, text: "" });
+    if (!res.ok) return;
+    const { id } = await res.json();
+    update(col.lender_id, (items) => [...items, { id, text: "", done: false, source: "manual", source_message_id: null, email_date: null }]);
+  }
+
+  const view = cols.filter((c) => !ownerFilter || c.owner === ownerFilter);
+  if (!view.length) return <p className="text-sm text-ink-tertiary">No lender pendencies yet — import the sheet or run an email scan.</p>;
+
+  const maxRows = Math.max(1, ...view.map((c) => c.items.length));
   const rowIdx = Array.from({ length: maxRows }, (_, i) => i);
 
   return (
-    <div className="overflow-auto rounded-xl border border-line" style={{ maxHeight: "75vh" }}>
+    <div className="overflow-auto rounded-xl border border-line" style={{ maxHeight: "80vh" }}>
       <table className="border-collapse text-xs">
         <thead className="sticky top-0 z-10">
-          {/* Owner band */}
           <tr>
-            <th className="sticky left-0 z-20 w-12 border border-[#1e3a5f] bg-[#1f4e79] px-2 py-1 text-white">&nbsp;</th>
-            {columns.map((c, i) => (
-              <th key={`o${i}`} className="border border-[#1e3a5f] bg-[#2e5f8f] px-2 py-1 font-medium text-white" style={{ minWidth: 200 }}>
-                {c.owner ?? "—"}
-              </th>
+            <th className="sticky left-0 z-20 w-10 border border-[#1e3a5f] bg-[#1f4e79] px-2 py-1 text-white">&nbsp;</th>
+            {view.map((c, i) => (
+              <th key={`o${i}`} className="border border-[#1e3a5f] bg-[#2e5f8f] px-2 py-1 font-medium text-white" style={{ minWidth: 210 }}>{c.owner ?? "—"}</th>
             ))}
           </tr>
-          {/* Lender name band */}
           <tr>
-            <th className="sticky left-0 z-20 w-12 border border-[#1e3a5f] bg-[#1f4e79] px-2 py-1 text-white">Sr.</th>
-            {columns.map((c, i) => (
-              <th key={`n${i}`} className="border border-[#1e3a5f] bg-[#1f4e79] px-2 py-1 text-left font-semibold text-white" style={{ minWidth: 200 }}>
-                {c.name}
-              </th>
+            <th className="sticky left-0 z-20 w-10 border border-[#1e3a5f] bg-[#1f4e79] px-2 py-1 text-white">Sr.</th>
+            {view.map((c, i) => (
+              <th key={`n${i}`} className="border border-[#1e3a5f] bg-[#1f4e79] px-2 py-1 text-left font-semibold text-white" style={{ minWidth: 210 }}>{c.name}</th>
             ))}
           </tr>
         </thead>
@@ -74,47 +98,28 @@ export function LenderSheetGrid({ grid, ownerFilter }: { grid: UnifiedGrid; owne
           {rowIdx.map((r) => (
             <tr key={r} className="align-top">
               <td className="sticky left-0 z-10 border border-line-light bg-surface-secondary px-2 py-1 text-center text-ink-tertiary">{r + 1}</td>
-              {columns.map((c, ci) => {
+              {view.map((c, ci) => {
                 const it = c.items[r];
-                if (!it) return <td key={ci} className="border border-line-light bg-surface px-2 py-1" style={{ minWidth: 200 }} />;
-                const email = it.source === "email";
-                const manual = it.source === "manual";
-                if (manual && it.manual_id) {
-                  return (
-                    <td key={ci} className="border border-line-light bg-sky-50 px-2 py-1" style={{ minWidth: 200, maxWidth: 320 }}>
-                      <ManualCell id={it.manual_id} text={it.text} />
-                      <span className="text-[10px] text-sky-600">added manually</span>
-                    </td>
-                  );
-                }
+                if (!it) return <td key={ci} className="border border-line-light bg-surface px-2 py-1" style={{ minWidth: 210 }} />;
                 return (
-                  <td
-                    key={ci}
-                    className={`border border-line-light px-2 py-1 ${email ? "bg-amber-50" : "bg-surface"}`}
-                    style={{ minWidth: 200, maxWidth: 320 }}
-                  >
-                    <span className="whitespace-pre-wrap text-ink">{it.text}</span>
-                    {it.status && <span className="ml-1 rounded bg-surface-secondary px-1 text-[10px] text-ink-secondary">{it.status}</span>}
-                    {email && (
-                      <span className="mt-0.5 block text-[10px] text-ink-tertiary">
-                        {it.email_date && <span suppressHydrationWarning>📅 {new Date(it.email_date).toLocaleDateString()} </span>}
-                        {it.source_message_id && (
-                          <a
-                            href={`/api/tools/lender-followup/message/${it.source_message_id}`}
-                            target="_blank"
-                            rel="noreferrer"
-                            className="text-brand hover:underline"
-                          >
-                            ✉ view mail
-                          </a>
-                        )}
-                      </span>
-                    )}
-                  </td>
+                  <Cell
+                    key={it.id ?? ci}
+                    item={it}
+                    onChange={(patch) => update(c.lender_id, (items) => items.map((x) => (x.id === it.id ? { ...x, ...patch } : x)))}
+                    onDelete={() => update(c.lender_id, (items) => items.filter((x) => x.id !== it.id))}
+                  />
                 );
               })}
             </tr>
           ))}
+          <tr>
+            <td className="sticky left-0 z-10 border border-line-light bg-surface-secondary px-2 py-1" />
+            {view.map((c, ci) => (
+              <td key={ci} className="border border-line-light bg-surface px-2 py-1">
+                <button onClick={() => addRow(c)} className="text-[11px] text-brand hover:underline">+ add</button>
+              </td>
+            ))}
+          </tr>
         </tbody>
       </table>
     </div>

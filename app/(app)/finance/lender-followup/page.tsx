@@ -6,7 +6,7 @@ import { LenderFollowupPageClient } from "@/components/lender/LenderFollowupPage
 import { buildUnifiedGrid } from "@/lib/lender/grid";
 import type { Lender, UnifiedGrid } from "@/lib/lender/types";
 
-const EMPTY_GRID: UnifiedGrid = { columns: [], counts: { lenders_with_items: 0, open_items: 0, sheet_items: 0, email_items: 0 }, findings: [] };
+const EMPTY_GRID: UnifiedGrid = { columns: [], counts: { lenders_with_items: 0, open_items: 0, sheet_items: 0, email_items: 0, done: 0 }, findings: [] };
 
 export default async function LenderFollowupPage() {
   const { user, department, role } = await requireDepartmentAccess("finance");

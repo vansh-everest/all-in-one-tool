@@ -6,6 +6,7 @@ import { LENDER_FOLLOWUP_SCOPES } from "@/lib/google/scopes";
 import { searchMessageRefs, getFull } from "@/lib/google/gmail";
 import { mapWithConcurrency, withRetry } from "@/lib/scrap-scale/queue";
 import { buildLenderQuery } from "@/lib/lender/searchQuery";
+import { normalizeLenderName as norm } from "@/lib/lender/importSheet";
 import { buildExtractPrompt } from "@/lib/lender/prompts";
 import { parseExtraction } from "@/lib/lender/extract";
 import { geminiJson } from "@/lib/gemini/client";
@@ -91,20 +92,52 @@ export async function POST(_req: Request, { params }: { params: Promise<{ runId:
               direction: it.direction,
               source_message_id: it.source_message_id || ref.id,
               thread_id: ref.threadId,
+              email_date: full.internalDate,
             }));
           } catch {
             // One thread failing (rate limit, parse, Gmail) must not fail the whole scan.
             return [] as Record<string, unknown>[];
           }
         });
-        for (const arr of perThread) newItems.push(...arr);
+        const lenderTasks = perThread.flat();
+        for (const t of lenderTasks) newItems.push(t);
+
+        // Add the found tasks to the editable grid (lender_items), skipping ones already present.
+        if (lenderTasks.length) {
+          const { data: existing } = await db.from("lender_items").select("text").eq("department_id", departmentId).eq("lender_id", lender.id);
+          const seenText = new Set((existing ?? []).map((r) => norm(r.text as string)));
+          const toAdd = [];
+          for (const t of lenderTasks) {
+            const key = norm(t.item as string);
+            if (!key || seenText.has(key)) continue;
+            seenText.add(key);
+            toAdd.push({
+              department_id: departmentId,
+              lender_id: lender.id,
+              position: 1000,
+              text: t.item as string,
+              source: "email",
+              source_message_id: (t.source_message_id as string) || null,
+              email_date: (t.email_date as string) || null,
+            });
+          }
+          if (toAdd.length) await db.from("lender_items").insert(toAdd);
+        }
       } catch {
         // Skip this lender on a search/Gmail error and keep going.
         continue;
       }
     }
 
-    if (newItems.length) await db.from("lender_run_items").insert(newItems);
+    // lender_run_items has no email_date column — strip it before inserting.
+    if (newItems.length) {
+      const runItems = newItems.map((t) => {
+        const { email_date: _drop, ...rest } = t as Record<string, unknown>;
+        void _drop;
+        return rest;
+      });
+      await db.from("lender_run_items").insert(runItems);
+    }
 
     const newCursor = cursor + slice.length;
     const counts = {

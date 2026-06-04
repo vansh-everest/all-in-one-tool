@@ -2,18 +2,19 @@ import { NextRequest, NextResponse } from "next/server";
 import { createAdminClient } from "@/utils/supabase/admin";
 import { requireFinance } from "@/lib/lender/access";
 
-// Edit a manual item's text.
+// Edit a cell's text and/or toggle done.
 export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const { departmentId } = await requireFinance();
   const body = await req.json().catch(() => ({}));
-  const item = typeof body?.item === "string" ? body.item.trim() : "";
-  if (!item) return NextResponse.json({ error: "item is required" }, { status: 400 });
+  const patch: Record<string, unknown> = { updated_at: new Date().toISOString() };
+  if (typeof body?.text === "string") patch.text = body.text;
+  if (typeof body?.done === "boolean") patch.done = body.done;
 
   const db = createAdminClient();
   const { data, error } = await db
-    .from("lender_manual_items")
-    .update({ item, updated_at: new Date().toISOString() })
+    .from("lender_items")
+    .update(patch)
     .eq("id", id)
     .eq("department_id", departmentId)
     .select("id");
@@ -22,13 +23,12 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   return NextResponse.json({ id });
 }
 
-// Delete a manual item.
 export async function DELETE(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const { departmentId } = await requireFinance();
   const db = createAdminClient();
   const { data, error } = await db
-    .from("lender_manual_items")
+    .from("lender_items")
     .delete()
     .eq("id", id)
     .eq("department_id", departmentId)

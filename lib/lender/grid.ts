@@ -1,30 +1,20 @@
 import type { createAdminClient } from "@/utils/supabase/admin";
-import { normalizeLenderName } from "./importSheet";
-import type { Direction, Extraction, Finding, GridColumn, GridItem, StoredSheetColumn, UnifiedGrid } from "./types";
+import type { Extraction, Finding, GridColumn, GridItem, StoredSheetColumn, UnifiedGrid } from "./types";
 
 type DB = ReturnType<typeof createAdminClient>;
 
-const dirOf = (v: unknown): Direction =>
-  v === "awaiting_lender" || v === "action_on_us" ? v : "unclear";
-
-const sheetItem = (text: string): GridItem => ({
-  text, status: "", last_update_date: null, direction: "unclear", source_message_id: null,
-  email_date: null, subject: null, manual_id: null, source: "sheet",
-});
-
 /**
- * Build the unified per-lender grid: the imported sheet's columns, the latest email run's
- * extracted tasks (merged in, deduped, tagged with the source email + date), and any
- * manually-added items. Also returns per-thread findings (including matched threads that
- * produced no task) for the review cards.
+ * Build the unified per-lender grid from lender_items (the single editable source of truth):
+ * sheet imports, email-found tasks, and manual adds are all rows there. Column order follows
+ * the imported sheet. Also returns per-thread findings (incl. matched threads with no task)
+ * from the latest email run's run-scoped message cache.
  */
 export async function buildUnifiedGrid(db: DB, departmentId: string): Promise<UnifiedGrid> {
-  // lender id -> {name, owner} for labelling email/manual-only columns.
   const { data: lendersData } = await db.from("lenders").select("id, name, owner").eq("department_id", departmentId);
   const lenderById = new Map<string, { name: string; owner: string | null }>();
   for (const l of lendersData ?? []) lenderById.set(l.id as string, { name: l.name as string, owner: (l.owner as string) ?? null });
 
-  // Sheet columns from the most recent import.
+  // Column order from the most recent import.
   const { data: importedRun } = await db
     .from("lender_runs")
     .select("summary")
@@ -34,9 +24,47 @@ export async function buildUnifiedGrid(db: DB, departmentId: string): Promise<Un
     .limit(1)
     .maybeSingle();
   const sheetColumns: StoredSheetColumn[] = (importedRun?.summary?.grid?.columns ?? []) as StoredSheetColumn[];
+  const order: string[] = sheetColumns.map((c) => c.lender_id).filter((x): x is string => !!x);
 
-  // Email findings from the most recent completed email run (run-scoped message cache, so
-  // even matched threads that produced no task are surfaced as findings).
+  // All editable items.
+  const { data: itemRows } = await db
+    .from("lender_items")
+    .select("id, lender_id, text, source, source_message_id, email_date, done, position, created_at")
+    .eq("department_id", departmentId)
+    .order("position")
+    .order("created_at");
+  const itemsByLender = new Map<string, GridItem[]>();
+  for (const it of itemRows ?? []) {
+    const key = (it.lender_id as string) ?? "none";
+    const arr = itemsByLender.get(key) ?? [];
+    arr.push({
+      id: it.id as string,
+      text: (it.text as string) ?? "",
+      done: !!it.done,
+      source: (it.source as GridItem["source"]) ?? "manual",
+      source_message_id: (it.source_message_id as string) ?? null,
+      email_date: (it.email_date as string) ?? null,
+    });
+    itemsByLender.set(key, arr);
+  }
+
+  // Build columns: imported order first, then any other lenders (with items, or all active).
+  const columns: GridColumn[] = [];
+  const used = new Set<string>();
+  const pushCol = (lenderId: string) => {
+    used.add(lenderId);
+    const meta = lenderById.get(lenderId);
+    columns.push({ lender_id: lenderId, name: meta?.name ?? "(unknown)", owner: meta?.owner ?? null, items: itemsByLender.get(lenderId) ?? [] });
+  };
+  for (const id of order) if (lenderById.has(id) && !used.has(id)) pushCol(id);
+  // Remaining lenders (e.g. added after import) sorted by name.
+  const remaining = [...lenderById.keys()].filter((id) => !used.has(id)).sort((a, b) => (lenderById.get(a)!.name).localeCompare(lenderById.get(b)!.name));
+  for (const id of remaining) pushCol(id);
+  // Items with no lender (shouldn't normally happen) as a trailing column.
+  if (itemsByLender.has("none")) columns.push({ lender_id: null, name: "(unassigned)", owner: null, items: itemsByLender.get("none")! });
+
+  // Findings from the latest completed email run (run-scoped message cache).
+  const findings: Finding[] = [];
   const { data: emailRun } = await db
     .from("lender_runs")
     .select("id")
@@ -45,101 +73,39 @@ export async function buildUnifiedGrid(db: DB, departmentId: string): Promise<Un
     .order("created_at", { ascending: false })
     .limit(1)
     .maybeSingle();
-
-  const emailByLender = new Map<string, GridItem[]>();
-  const findings: Finding[] = [];
   if (emailRun?.id) {
     const { data: cache } = await db
       .from("lender_message_cache")
-      .select("message_id, lender_id, thread_id, subject, internal_date, extraction")
+      .select("message_id, lender_id, subject, internal_date, extraction")
       .eq("department_id", departmentId)
       .eq("run_id", emailRun.id);
     for (const row of cache ?? []) {
       const lenderId = (row.lender_id as string) ?? null;
-      const key = lenderId ?? "none";
-      const ext = (row.extraction ?? { items: [], last_contact_date: null }) as Extraction;
-      const emailDate = (row.internal_date as string) ?? null;
-      const subject = (row.subject as string) ?? null;
-      const srcId = (row.message_id as string) ?? null;
-
-      const arr = emailByLender.get(key) ?? [];
-      for (const it of ext.items) {
-        arr.push({
-          text: it.item,
-          status: it.status,
-          last_update_date: it.last_update_date,
-          direction: dirOf(it.direction),
-          source_message_id: srcId,
-          email_date: emailDate,
-          subject,
-          manual_id: null,
-          source: "email",
-        });
-      }
-      emailByLender.set(key, arr);
-
       const lender = lenderId ? lenderById.get(lenderId) : undefined;
+      const ext = (row.extraction ?? { items: [], last_contact_date: null }) as Extraction;
       findings.push({
         lender_id: lenderId,
         lender_name: lender?.name ?? "(unknown)",
         owner: lender?.owner ?? null,
-        subject: subject ?? "(no subject)",
-        email_date: emailDate,
-        source_message_id: srcId,
+        subject: (row.subject as string) ?? "(no subject)",
+        email_date: (row.internal_date as string) ?? null,
+        source_message_id: (row.message_id as string) ?? null,
         items: ext.items.map((i) => i.item),
       });
     }
     findings.sort((a, b) => (b.email_date ?? "").localeCompare(a.email_date ?? ""));
   }
 
-  // Manually-added items.
-  const { data: manualRows } = await db
-    .from("lender_manual_items")
-    .select("id, lender_id, item")
-    .eq("department_id", departmentId)
-    .order("created_at");
-  const manualByLender = new Map<string, GridItem[]>();
-  for (const m of manualRows ?? []) {
-    const key = (m.lender_id as string) ?? "none";
-    const arr = manualByLender.get(key) ?? [];
-    arr.push({
-      text: (m.item as string) ?? "",
-      status: "", last_update_date: null, direction: "unclear",
-      source_message_id: null, email_date: null, subject: null,
-      manual_id: m.id as string, source: "manual",
-    });
-    manualByLender.set(key, arr);
-  }
-
-  const columns: GridColumn[] = [];
-  const usedKeys = new Set<string>();
-
-  const mergeFor = (key: string, sheetItems: GridItem[]): GridItem[] => {
-    const sheetNorm = new Set(sheetItems.map((i) => normalizeLenderName(i.text)));
-    const email = (emailByLender.get(key) ?? []).filter((e) => !sheetNorm.has(normalizeLenderName(e.text)));
-    const manual = manualByLender.get(key) ?? [];
-    return [...sheetItems, ...email, ...manual];
-  };
-
-  for (const sc of sheetColumns) {
-    const key = sc.lender_id ?? "none";
-    usedKeys.add(key);
-    columns.push({ lender_id: sc.lender_id, name: sc.name, owner: sc.owner, items: mergeFor(key, (sc.items ?? []).map(sheetItem)) });
-  }
-
-  // Lenders with only email/manual items (not in the imported sheet) get appended.
-  const extraKeys = new Set<string>([...emailByLender.keys(), ...manualByLender.keys()].filter((k) => !usedKeys.has(k)));
-  for (const key of extraKeys) {
-    const lender = key !== "none" ? lenderById.get(key) : undefined;
-    columns.push({ lender_id: key === "none" ? null : key, name: lender?.name ?? "(unassigned)", owner: lender?.owner ?? null, items: mergeFor(key, []) });
-  }
-
-  const open_items = columns.reduce((s, c) => s + c.items.length, 0);
-  const sheet_items = columns.reduce((s, c) => s + c.items.filter((i) => i.source === "sheet").length, 0);
-  const email_items = columns.reduce((s, c) => s + c.items.filter((i) => i.source === "email").length, 0);
+  const allItems = columns.flatMap((c) => c.items);
   return {
     columns,
-    counts: { lenders_with_items: columns.filter((c) => c.items.length > 0).length, open_items, sheet_items, email_items },
+    counts: {
+      lenders_with_items: columns.filter((c) => c.items.some((i) => !i.done)).length,
+      open_items: allItems.filter((i) => !i.done).length,
+      sheet_items: allItems.filter((i) => i.source === "sheet").length,
+      email_items: allItems.filter((i) => i.source === "email").length,
+      done: allItems.filter((i) => i.done).length,
+    },
     findings,
   };
 }

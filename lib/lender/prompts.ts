@@ -24,8 +24,12 @@ export function buildExtractPrompt(
     .join("\n\n");
   return [
     `These are the latest email(s) in a thread with the lender "${lenderName}".`,
-    "Extract the list of OPEN pending items (things still to be done or awaited).",
-    "Be concise and factual, matching short status-note style (e.g. \"NACH to be revised to new EMI - submitted\").",
+    "Extract EVERY open/pending task, request or action mentioned — be inclusive, not conservative.",
+    "Count as a task any of: an explicit request (\"please do X\", \"task: X\", \"close the task: X\"),",
+    "a pending document/NOC/NDC/confirmation, a follow-up, anything awaiting a reply, or anything not yet done.",
+    "If the email literally states a task (e.g. body says \"Please close the task : jump\"), return it (item: \"jump\" / \"close the task: jump\").",
+    "Keep each item concise and factual (e.g. \"NACH to be revised to new EMI - submitted\").",
+    "Only return an empty items array if the email genuinely contains no task, request or pending item at all.",
     "",
     "Respond with JSON only in exactly this shape:",
     "{",

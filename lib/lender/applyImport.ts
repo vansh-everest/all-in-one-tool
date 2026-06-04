@@ -57,35 +57,7 @@ export async function applyImport(
     }
   }
 
-  const itemRows = parsed.items
-    .map((it) => {
-      const l = byNorm.get(normalizeLenderName(it.lenderName));
-      if (!l) return null;
-      return {
-        lender_id: l.id,
-        lender_name: l.name,
-        owner: l.owner ?? null,
-        item: it.item,
-        status: "",
-        last_update_date: null as string | null,
-        direction: "unclear",
-        source_message_id: "",
-        thread_id: null as string | null,
-      };
-    })
-    .filter((r): r is NonNullable<typeof r> => r !== null);
-
-  const lendersWithItems = new Set(itemRows.map((r) => r.lender_id)).size;
-  const counts = {
-    unread_total: 0,
-    matched: 0,
-    queued: 0,
-    lenders_with_items: lendersWithItems,
-    open_items: itemRows.length,
-  };
-
-  // Persist the sheet's lender columns + items in order, so the tracker can render the
-  // exact Google-Sheets-style grid (and merge email findings) without re-importing.
+  // Persist the sheet's lender columns in order (for the grid's column order + names/owners).
   const gridColumns = parsed.lenders.map((pl) => {
     const l = byNorm.get(normalizeLenderName(pl.name));
     return {
@@ -95,6 +67,22 @@ export async function applyImport(
       items: parsed.items.filter((it) => it.lenderName === pl.name).map((it) => it.item),
     };
   });
+
+  // Replace the sheet-sourced editable items with this import's contents.
+  await db.from("lender_items").delete().eq("department_id", departmentId).eq("source", "sheet");
+  const itemRows = parsed.items
+    .map((it, idx) => {
+      const l = byNorm.get(normalizeLenderName(it.lenderName));
+      if (!l) return null;
+      return { department_id: departmentId, lender_id: l.id, position: idx, text: it.item, source: "sheet" };
+    })
+    .filter((r): r is NonNullable<typeof r> => r !== null);
+  for (let i = 0; i < itemRows.length; i += 500) {
+    await db.from("lender_items").insert(itemRows.slice(i, i + 500));
+  }
+
+  const lendersWithItems = new Set(itemRows.map((r) => r.lender_id)).size;
+  const counts = { unread_total: 0, matched: 0, queued: 0, lenders_with_items: lendersWithItems, open_items: itemRows.length };
 
   const { data: run } = await db
     .from("lender_runs")
@@ -112,13 +100,6 @@ export async function applyImport(
     })
     .select("id")
     .single();
-
-  if (run?.id && itemRows.length) {
-    const withRun = itemRows.map((r) => ({ ...r, run_id: run.id }));
-    for (let i = 0; i < withRun.length; i += 500) {
-      await db.from("lender_run_items").insert(withRun.slice(i, i + 500));
-    }
-  }
 
   return {
     runId: run?.id ?? null,
