@@ -1,10 +1,11 @@
 export const SCOPES = {
   sheets: "https://www.googleapis.com/auth/spreadsheets",
   driveReadonly: "https://www.googleapis.com/auth/drive.readonly",
-  // gmail tools (later) add their scope here
+  gmailReadonly: "https://www.googleapis.com/auth/gmail.readonly",
 } as const;
 
 export const SCRAP_SCALE_SCOPES = [SCOPES.sheets, SCOPES.driveReadonly];
+export const LENDER_FOLLOWUP_SCOPES = [SCOPES.gmailReadonly];
 
 export function hasAllScopes(granted: string[], required: string[]): boolean {
   const set = new Set(granted);

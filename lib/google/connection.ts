@@ -1,5 +1,5 @@
 import { clerkClient } from "@clerk/nextjs/server";
-import { hasAllScopes, SCRAP_SCALE_SCOPES } from "./scopes";
+import { hasAllScopes } from "./scopes";
 
 export class ReconsentRequired extends Error {
   constructor(msg = "Google re-consent required") {
@@ -30,10 +30,13 @@ async function getGoogleToken(clerkUserId: string): Promise<{ token: string; sco
   }
 }
 
-/** Connection status for the UI: present only when the Google sign-in granted the Scrap Scale scopes. */
-export async function getConnection(clerkUserId: string): Promise<GoogleConnection | null> {
+/** Connection status for the UI: present only when the Google sign-in granted the required scopes. */
+export async function getConnection(
+  clerkUserId: string,
+  requiredScopes: string[],
+): Promise<GoogleConnection | null> {
   const tok = await getGoogleToken(clerkUserId);
-  if (!tok || !hasAllScopes(tok.scopes, SCRAP_SCALE_SCOPES)) return null;
+  if (!tok || !hasAllScopes(tok.scopes, requiredScopes)) return null;
 
   const client = await clerkClient();
   const user = await client.users.getUser(clerkUserId);

@@ -1,5 +1,6 @@
 import { requireDepartmentAccess } from "@/lib/auth/guards";
 import { getConnection } from "@/lib/google/connection";
+import { SCRAP_SCALE_SCOPES } from "@/lib/google/scopes";
 import { ScrapScaleApp } from "@/components/scrap-scale/ScrapScaleApp";
 import { RunHistory } from "@/components/scrap-scale/RunHistory";
 import { createAdminClient } from "@/utils/supabase/admin";
@@ -7,7 +8,7 @@ import { createAdminClient } from "@/utils/supabase/admin";
 export default async function ScrapScalePage() {
   const { user, department, role } = await requireDepartmentAccess("accounting");
   const canDelete = role === "admin" || role === "super";
-  const conn = await getConnection(user.id);
+  const conn = await getConnection(user.id, SCRAP_SCALE_SCOPES);
   const supabase = createAdminClient();
   const { data: runs } = await supabase
     .from("scrap_scale_runs")
