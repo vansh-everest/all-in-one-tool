@@ -80,6 +80,25 @@ export async function POST(_req: Request, { params }: { params: Promise<{ runId:
     );
   });
 
+  // Cache queued senders' metadata (no extraction, no lender) so the review queue has context.
+  const queuedMetas = matched.filter((x) => !x.lenderId).map((x) => x.meta);
+  if (queuedMetas.length) {
+    await db.from("lender_message_cache").upsert(
+      queuedMetas.map((m) => ({
+        department_id: departmentId,
+        message_id: m.id,
+        lender_id: null,
+        thread_id: m.threadId,
+        from_email: m.fromEmail,
+        subject: m.subject,
+        internal_date: m.internalDate,
+        snippet: m.snippet,
+        extraction: null,
+      })),
+      { onConflict: "department_id,message_id" },
+    );
+  }
+
   // 4. advance cursor + accumulate queued ids/counts
   const prevQueued: string[] = Array.isArray(run.summary?.queued_ids) ? run.summary.queued_ids : [];
   const queuedIds = [...prevQueued, ...queued];
