@@ -2,6 +2,39 @@ import type { createAdminClient } from "@/utils/supabase/admin";
 import type { Extraction, Finding, GridColumn, GridItem, StoredSheetColumn, UnifiedGrid } from "./types";
 
 type DB = ReturnType<typeof createAdminClient>;
+type LenderMeta = Map<string, { name: string; owner: string | null }>;
+
+/** Matched email threads for a specific run (vendor, subject, date, extracted tasks). */
+export async function buildRunFindings(db: DB, departmentId: string, runId: string, lenderById?: LenderMeta): Promise<Finding[]> {
+  let meta = lenderById;
+  if (!meta) {
+    meta = new Map();
+    const { data } = await db.from("lenders").select("id, name, owner").eq("department_id", departmentId);
+    for (const l of data ?? []) meta.set(l.id as string, { name: l.name as string, owner: (l.owner as string) ?? null });
+  }
+  const { data: cache } = await db
+    .from("lender_message_cache")
+    .select("message_id, lender_id, subject, internal_date, extraction")
+    .eq("department_id", departmentId)
+    .eq("run_id", runId);
+  const findings: Finding[] = [];
+  for (const row of cache ?? []) {
+    const lenderId = (row.lender_id as string) ?? null;
+    const lender = lenderId ? meta.get(lenderId) : undefined;
+    const ext = (row.extraction ?? { items: [], last_contact_date: null }) as Extraction;
+    findings.push({
+      lender_id: lenderId,
+      lender_name: lender?.name ?? "(unknown)",
+      owner: lender?.owner ?? null,
+      subject: (row.subject as string) ?? "(no subject)",
+      email_date: (row.internal_date as string) ?? null,
+      source_message_id: (row.message_id as string) ?? null,
+      items: ext.items.map((i) => i.item),
+    });
+  }
+  findings.sort((a, b) => (b.email_date ?? "").localeCompare(a.email_date ?? ""));
+  return findings;
+}
 
 /**
  * Build the unified per-lender grid from lender_items (the single editable source of truth):
@@ -64,7 +97,6 @@ export async function buildUnifiedGrid(db: DB, departmentId: string): Promise<Un
   if (itemsByLender.has("none")) columns.push({ lender_id: null, name: "(unassigned)", owner: null, items: itemsByLender.get("none")! });
 
   // Findings from the latest completed email run (run-scoped message cache).
-  const findings: Finding[] = [];
   const { data: emailRun } = await db
     .from("lender_runs")
     .select("id")
@@ -73,28 +105,7 @@ export async function buildUnifiedGrid(db: DB, departmentId: string): Promise<Un
     .order("created_at", { ascending: false })
     .limit(1)
     .maybeSingle();
-  if (emailRun?.id) {
-    const { data: cache } = await db
-      .from("lender_message_cache")
-      .select("message_id, lender_id, subject, internal_date, extraction")
-      .eq("department_id", departmentId)
-      .eq("run_id", emailRun.id);
-    for (const row of cache ?? []) {
-      const lenderId = (row.lender_id as string) ?? null;
-      const lender = lenderId ? lenderById.get(lenderId) : undefined;
-      const ext = (row.extraction ?? { items: [], last_contact_date: null }) as Extraction;
-      findings.push({
-        lender_id: lenderId,
-        lender_name: lender?.name ?? "(unknown)",
-        owner: lender?.owner ?? null,
-        subject: (row.subject as string) ?? "(no subject)",
-        email_date: (row.internal_date as string) ?? null,
-        source_message_id: (row.message_id as string) ?? null,
-        items: ext.items.map((i) => i.item),
-      });
-    }
-    findings.sort((a, b) => (b.email_date ?? "").localeCompare(a.email_date ?? ""));
-  }
+  const findings = emailRun?.id ? await buildRunFindings(db, departmentId, emailRun.id, lenderById) : [];
 
   const allItems = columns.flatMap((c) => c.items);
   return {

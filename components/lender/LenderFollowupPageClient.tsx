@@ -29,7 +29,7 @@ export function LenderFollowupPageClient({
       {tab === "tracker" ? (
         <>
           <LenderFollowupApp connected={connected} connectedEmail={connectedEmail} grid={grid} />
-          <LenderRunHistory runs={runs} />
+          <LenderRunHistory runs={runs} canManage={canManage} />
         </>
       ) : (
         <LenderManager initial={lenders} canManage={canManage} />

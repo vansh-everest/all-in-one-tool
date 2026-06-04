@@ -159,8 +159,8 @@ export function LenderFollowupApp({
       <LenderFindings findings={grid.findings} />
 
       <p className="text-xs text-ink-tertiary">
-        Edit any cell like a spreadsheet — type to edit (saves when you click away), check the box to mark a task done,
-        ✕ to delete, and <b>+ add</b> at the bottom of a column to add a task.
+        Click any cell to open the editor — edit the text, mark it done, or delete it. Use <b>+ add</b> at the bottom of a
+        column to add a task. Amber = found in email, sky = added manually, green = done.
       </p>
       <LenderSheetGrid grid={grid} ownerFilter={ownerFilter} />
       <p className="text-xs text-ink-tertiary">
