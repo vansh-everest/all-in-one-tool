@@ -44,15 +44,22 @@ export function LenderFollowupApp({
     const { runId: id, total } = await res.json();
     setProgress({ processed: 0, total, matched: 0 });
     let done = false;
+    let failed = false;
     while (!done) {
       const cr = await fetch(`/api/tools/lender-followup/run/${id}/process-chunk`, { method: "POST" });
-      if (!cr.ok) { setError("Processing error"); break; }
+      if (!cr.ok) {
+        const body = await cr.json().catch(() => ({}));
+        setError((body as { error?: string }).error ?? "Processing error");
+        failed = true;
+        break;
+      }
       const p = await cr.json();
       setProgress({ processed: p.processed, total: p.total, matched: p.matched });
       done = p.done;
     }
-    // Reload so the server rebuilds the unified grid (sheet + these email findings).
-    window.location.reload();
+    setBusy(false);
+    // Only reload on a clean finish; on error keep the message visible (no blind refresh).
+    if (done && !failed) window.location.reload();
   }
 
   async function importFromSheet() {
