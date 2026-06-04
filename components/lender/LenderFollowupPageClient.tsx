@@ -28,7 +28,7 @@ export function LenderFollowupPageClient({
       </div>
       {tab === "tracker" ? (
         <>
-          <LenderFollowupApp connected={connected} connectedEmail={connectedEmail} grid={grid} />
+          <LenderFollowupApp connected={connected} connectedEmail={connectedEmail} lenders={lenders} grid={grid} />
           <LenderRunHistory runs={runs} />
         </>
       ) : (

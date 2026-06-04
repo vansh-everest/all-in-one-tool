@@ -76,6 +76,7 @@ export async function POST(_req: Request, { params }: { params: Promise<{ runId:
                 internal_date: full.internalDate,
                 snippet: "",
                 extraction: ext,
+                run_id: runId,
               },
               { onConflict: "department_id,message_id" },
             );

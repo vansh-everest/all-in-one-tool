@@ -54,7 +54,7 @@ export type RunCounts = {
 
 // ----- Unified Google-Sheets-style grid (imported sheet + merged email findings) -----
 
-export type GridItemSource = "sheet" | "email";
+export type GridItemSource = "sheet" | "email" | "manual";
 
 export type GridItem = {
   text: string;
@@ -64,6 +64,7 @@ export type GridItem = {
   source_message_id: string | null; // present for email-found items
   email_date: string | null;        // the source email's date (ISO), for email items
   subject: string | null;           // the source email's subject, for email items
+  manual_id: string | null;         // row id for manually-added items (editable/deletable)
   source: GridItemSource;
 };
 

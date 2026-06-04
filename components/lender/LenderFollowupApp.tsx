@@ -1,7 +1,7 @@
 "use client";
 import { useState } from "react";
 import { SignOutButton } from "@clerk/nextjs";
-import type { UnifiedGrid } from "@/lib/lender/types";
+import type { Lender, UnifiedGrid } from "@/lib/lender/types";
 import { LenderSheetGrid } from "./LenderSheetGrid";
 import { LenderFindings } from "./LenderFindings";
 
@@ -14,12 +14,16 @@ const EXPORT_PATH = "/api/tools/lender-followup/run/current/export";
 export function LenderFollowupApp({
   connected,
   connectedEmail,
+  lenders,
   grid,
 }: {
   connected: boolean;
   connectedEmail: string | null;
+  lenders: Lender[];
   grid: UnifiedGrid;
 }) {
+  const [addLenderId, setAddLenderId] = useState("");
+  const [addItem, setAddItem] = useState("");
   const [progress, setProgress] = useState<{ processed: number; total: number; matched: number } | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -61,6 +65,22 @@ export function LenderFollowupApp({
     setBusy(false);
     // Only reload on a clean finish; on error keep the message visible (no blind refresh).
     if (done && !failed) window.location.reload();
+  }
+
+  async function addManual() {
+    if (!addLenderId || !addItem.trim()) return;
+    setBusy(true);
+    const res = await fetch("/api/tools/lender-followup/manual", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ lenderId: addLenderId, item: addItem.trim() }),
+    });
+    setBusy(false);
+    if (!res.ok) {
+      setError((await res.json().catch(() => ({}))).error ?? "Could not add task");
+      return;
+    }
+    window.location.reload();
   }
 
   async function importFromSheet() {
@@ -157,6 +177,29 @@ export function LenderFollowupApp({
       </div>
 
       <LenderFindings findings={grid.findings} />
+
+      {/* Manually add a task to any lender's column */}
+      <div className="rounded-2xl border border-line bg-surface p-3 shadow-cal">
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="text-sm font-medium text-ink">Add a task manually:</span>
+          <select value={addLenderId} onChange={(e) => setAddLenderId(e.target.value)} className="rounded-lg border border-line px-2 py-1.5 text-sm text-gray-900">
+            <option value="">Choose lender…</option>
+            {[...lenders].sort((a, b) => a.name.localeCompare(b.name)).map((l) => (
+              <option key={l.id} value={l.id}>{l.name}</option>
+            ))}
+          </select>
+          <input
+            value={addItem}
+            onChange={(e) => setAddItem(e.target.value)}
+            onKeyDown={(e) => e.key === "Enter" && addManual()}
+            placeholder="Task / pending item…"
+            className="min-w-[16rem] flex-1 rounded-lg border border-line px-3 py-1.5 text-sm text-gray-900"
+          />
+          <button onClick={addManual} disabled={busy || !addLenderId || !addItem.trim()} className="rounded-lg bg-brand px-4 py-1.5 text-sm font-medium text-white disabled:opacity-50">
+            Add
+          </button>
+        </div>
+      </div>
 
       <LenderSheetGrid grid={grid} ownerFilter={ownerFilter} />
       <p className="text-xs text-ink-tertiary">

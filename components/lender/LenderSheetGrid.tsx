@@ -1,10 +1,44 @@
 "use client";
+import { useState } from "react";
 import type { UnifiedGrid } from "@/lib/lender/types";
+
+async function deleteManual(id: string) {
+  if (!confirm("Delete this manually-added task?")) return;
+  const res = await fetch(`/api/tools/lender-followup/manual/${id}`, { method: "DELETE" });
+  if (res.ok) window.location.reload();
+  else alert((await res.json().catch(() => ({}))).error ?? "Delete failed");
+}
+
+async function patchManual(id: string, item: string) {
+  await fetch(`/api/tools/lender-followup/manual/${id}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ item }),
+  });
+}
+
+/** Editable cell for a manually-added item: saves on blur, with a delete control. */
+function ManualCell({ id, text }: { id: string; text: string }) {
+  const [val, setVal] = useState(text);
+  return (
+    <div className="flex items-start gap-1">
+      <textarea
+        value={val}
+        onChange={(e) => setVal(e.target.value)}
+        onBlur={() => val.trim() && val !== text && patchManual(id, val.trim())}
+        rows={Math.max(1, Math.ceil(val.length / 30))}
+        className="w-full resize-y rounded border border-sky-200 bg-white px-1 py-0.5 text-xs text-ink"
+      />
+      <button onClick={() => deleteManual(id)} className="shrink-0 text-[11px] text-red-500 hover:text-red-700" title="Delete">✕</button>
+    </div>
+  );
+}
 
 /**
  * Renders the unified tracker as a Google-Sheets-style matrix: lenders are columns
  * (owner band + name band header, like the source sheet), each column lists its pending
- * items down the rows. Email-found items are tinted and link to their source mail.
+ * items down the rows. Email-found items are amber + link to their mail; manual items are
+ * editable (sky-tinted) with a delete control.
  */
 export function LenderSheetGrid({ grid, ownerFilter }: { grid: UnifiedGrid; ownerFilter: string }) {
   const columns = grid.columns.filter((c) => !ownerFilter || c.owner === ownerFilter);
@@ -44,6 +78,15 @@ export function LenderSheetGrid({ grid, ownerFilter }: { grid: UnifiedGrid; owne
                 const it = c.items[r];
                 if (!it) return <td key={ci} className="border border-line-light bg-surface px-2 py-1" style={{ minWidth: 200 }} />;
                 const email = it.source === "email";
+                const manual = it.source === "manual";
+                if (manual && it.manual_id) {
+                  return (
+                    <td key={ci} className="border border-line-light bg-sky-50 px-2 py-1" style={{ minWidth: 200, maxWidth: 320 }}>
+                      <ManualCell id={it.manual_id} text={it.text} />
+                      <span className="text-[10px] text-sky-600">added manually</span>
+                    </td>
+                  );
+                }
                 return (
                   <td
                     key={ci}
