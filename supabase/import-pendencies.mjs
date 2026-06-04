@@ -112,11 +112,21 @@ async function main() {
   const lendersWithItems = new Set(itemRows.map((r) => r.lender_id)).size;
   const counts = { unread_total: 0, matched: 0, queued: 0, lenders_with_items: lendersWithItems, open_items: itemRows.length };
 
+  const gridColumns = parsed.lenders.map((pl) => {
+    const l = byNorm.get(normalizeLenderName(pl.name));
+    return {
+      lender_id: l?.id ?? null,
+      name: l?.name ?? pl.name,
+      owner: l?.owner ?? pl.owner ?? null,
+      items: parsed.items.filter((it) => it.lenderName === pl.name).map((it) => it.item),
+    };
+  });
+
   const { data: run, error: runErr } = await db
     .from("lender_runs")
     .insert({
       department_id: departmentId, created_by_email: IMPORTER_EMAIL, status: "imported",
-      worklist: [], cursor: 0, counts, summary: { source: "csv-import" },
+      worklist: [], cursor: 0, counts, summary: { source: "csv-import", grid: { columns: gridColumns } },
       activities: [{ at: new Date().toISOString(), message: `Imported ${parsed.lenders.length} lenders and ${itemRows.length} pending items from the Pendencies sheet` }],
     })
     .select("id").single();

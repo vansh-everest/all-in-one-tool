@@ -86,6 +86,29 @@ export async function listUnreadIds(token: string): Promise<string[]> {
   return ids;
 }
 
+/**
+ * Search unread mail with an arbitrary Gmail query, returning message refs (newest first).
+ * Capped at `max` results so a single lender can't pull an unbounded set.
+ */
+export async function searchMessageRefs(
+  token: string,
+  query: string,
+  max = 25,
+): Promise<{ id: string; threadId: string }[]> {
+  const refs: { id: string; threadId: string }[] = [];
+  let pageToken: string | undefined;
+  do {
+    const q = new URLSearchParams({ q: query, maxResults: String(Math.min(100, max - refs.length)) });
+    if (pageToken) q.set("pageToken", pageToken);
+    const res = await gFetch(token, `/messages?${q.toString()}`);
+    if (!res.ok) throw new Error(`Gmail search ${res.status}: ${(await res.text()).slice(0, 200)}`);
+    const json = await res.json();
+    for (const m of json.messages ?? []) refs.push({ id: m.id, threadId: m.threadId });
+    pageToken = json.nextPageToken;
+  } while (pageToken && refs.length < max);
+  return refs.slice(0, max);
+}
+
 export async function getMetadata(token: string, id: string): Promise<EmailMeta> {
   const q = "format=metadata&metadataHeaders=From&metadataHeaders=Subject&metadataHeaders=Date";
   const res = await gFetch(token, `/messages/${id}?${q}`);

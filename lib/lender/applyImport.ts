@@ -84,6 +84,18 @@ export async function applyImport(
     open_items: itemRows.length,
   };
 
+  // Persist the sheet's lender columns + items in order, so the tracker can render the
+  // exact Google-Sheets-style grid (and merge email findings) without re-importing.
+  const gridColumns = parsed.lenders.map((pl) => {
+    const l = byNorm.get(normalizeLenderName(pl.name));
+    return {
+      lender_id: l?.id ?? null,
+      name: l?.name ?? pl.name,
+      owner: l?.owner ?? pl.owner ?? null,
+      items: parsed.items.filter((it) => it.lenderName === pl.name).map((it) => it.item),
+    };
+  });
+
   const { data: run } = await db
     .from("lender_runs")
     .insert({
@@ -93,7 +105,7 @@ export async function applyImport(
       worklist: [],
       cursor: 0,
       counts,
-      summary: { source: "sheet-import" },
+      summary: { source: "sheet-import", grid: { columns: gridColumns } },
       activities: [
         { at: new Date().toISOString(), message: `Imported ${parsed.lenders.length} lenders and ${itemRows.length} pending items from a sheet` },
       ],

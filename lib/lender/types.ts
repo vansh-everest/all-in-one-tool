@@ -49,4 +49,33 @@ export type RunCounts = {
   queued: number;
   lenders_with_items: number;
   open_items: number;
+  lenders_total?: number;
 };
+
+// ----- Unified Google-Sheets-style grid (imported sheet + merged email findings) -----
+
+export type GridItemSource = "sheet" | "email";
+
+export type GridItem = {
+  text: string;
+  status: string;
+  last_update_date: string | null;
+  direction: Direction;
+  source_message_id: string | null; // present for email-found items
+  source: GridItemSource;
+};
+
+export type GridColumn = {
+  lender_id: string | null;
+  name: string;
+  owner: string | null;
+  items: GridItem[];
+};
+
+export type UnifiedGrid = {
+  columns: GridColumn[];
+  counts: { lenders_with_items: number; open_items: number; sheet_items: number; email_items: number };
+};
+
+// Stored on the imported run (summary.grid): the sheet's lender columns + their items in order.
+export type StoredSheetColumn = { lender_id: string | null; name: string; owner: string | null; items: string[] };

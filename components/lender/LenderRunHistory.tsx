@@ -22,19 +22,18 @@ export function LenderRunHistory({ runs }: { runs: Run[] }) {
               <th className="px-3 py-2">Matched</th>
               <th className="px-3 py-2">Open items</th>
               <th className="px-3 py-2">Lenders</th>
-              <th className="px-3 py-2">Queued</th>
               <th className="px-3 py-2">Status</th>
             </tr>
           </thead>
           <tbody>
             {runs.map((r) => (
               <tr key={r.id} className="border-t border-line-light">
-                <td className="px-3 py-2 text-ink">{new Date(r.created_at).toLocaleString()}</td>
+                {/* suppressHydrationWarning: toLocaleString differs between server and client locale/timezone */}
+                <td className="px-3 py-2 text-ink" suppressHydrationWarning>{new Date(r.created_at).toLocaleString()}</td>
                 <td className="px-3 py-2 text-ink-secondary">{r.created_by_email ?? "—"}</td>
                 <td className="px-3 py-2 text-ink">{r.counts?.matched ?? "—"}</td>
                 <td className="px-3 py-2 text-ink">{r.counts?.open_items ?? "—"}</td>
                 <td className="px-3 py-2 text-ink">{r.counts?.lenders_with_items ?? "—"}</td>
-                <td className="px-3 py-2 text-ink">{r.counts?.queued ?? "—"}</td>
                 <td className="px-3 py-2 text-ink-secondary">{r.status}</td>
               </tr>
             ))}

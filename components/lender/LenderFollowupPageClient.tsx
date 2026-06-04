@@ -3,15 +3,14 @@ import { useState } from "react";
 import { LenderFollowupApp } from "./LenderFollowupApp";
 import { LenderManager } from "./LenderManager";
 import { LenderRunHistory } from "./LenderRunHistory";
-import type { Lender, TrackerLender, RunCounts } from "@/lib/lender/types";
+import type { Lender, UnifiedGrid } from "@/lib/lender/types";
 
 type Run = { id: string; created_at: string; created_by_email: string | null; status: string; counts: { matched?: number; open_items?: number; lenders_with_items?: number; queued?: number } | null };
 
 export function LenderFollowupPageClient({
-  connected, connectedEmail, lenders, runs, canManage, initialRunId, initialTracker, initialCounts,
+  connected, connectedEmail, lenders, runs, canManage, grid,
 }: {
-  connected: boolean; connectedEmail: string | null; lenders: Lender[]; runs: Run[]; canManage: boolean;
-  initialRunId: string | null; initialTracker: TrackerLender[]; initialCounts: RunCounts | null;
+  connected: boolean; connectedEmail: string | null; lenders: Lender[]; runs: Run[]; canManage: boolean; grid: UnifiedGrid;
 }) {
   const [tab, setTab] = useState<"tracker" | "lenders">("tracker");
   return (
@@ -29,14 +28,7 @@ export function LenderFollowupPageClient({
       </div>
       {tab === "tracker" ? (
         <>
-          <LenderFollowupApp
-            connected={connected}
-            connectedEmail={connectedEmail}
-            lenders={lenders}
-            initialRunId={initialRunId}
-            initialTracker={initialTracker}
-            initialCounts={initialCounts}
-          />
+          <LenderFollowupApp connected={connected} connectedEmail={connectedEmail} grid={grid} />
           <LenderRunHistory runs={runs} />
         </>
       ) : (
