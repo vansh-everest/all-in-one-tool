@@ -3,14 +3,15 @@ import { useState } from "react";
 import { LenderFollowupApp } from "./LenderFollowupApp";
 import { LenderManager } from "./LenderManager";
 import { LenderRunHistory } from "./LenderRunHistory";
-import type { Lender } from "@/lib/lender/types";
+import type { Lender, TrackerLender, RunCounts } from "@/lib/lender/types";
 
 type Run = { id: string; created_at: string; created_by_email: string | null; status: string; counts: { matched?: number; open_items?: number; lenders_with_items?: number; queued?: number } | null };
 
 export function LenderFollowupPageClient({
-  connected, connectedEmail, lenders, runs, canManage,
+  connected, connectedEmail, lenders, runs, canManage, initialRunId, initialTracker, initialCounts,
 }: {
   connected: boolean; connectedEmail: string | null; lenders: Lender[]; runs: Run[]; canManage: boolean;
+  initialRunId: string | null; initialTracker: TrackerLender[]; initialCounts: RunCounts | null;
 }) {
   const [tab, setTab] = useState<"tracker" | "lenders">("tracker");
   return (
@@ -28,7 +29,14 @@ export function LenderFollowupPageClient({
       </div>
       {tab === "tracker" ? (
         <>
-          <LenderFollowupApp connected={connected} connectedEmail={connectedEmail} lenders={lenders} />
+          <LenderFollowupApp
+            connected={connected}
+            connectedEmail={connectedEmail}
+            lenders={lenders}
+            initialRunId={initialRunId}
+            initialTracker={initialTracker}
+            initialCounts={initialCounts}
+          />
           <LenderRunHistory runs={runs} />
         </>
       ) : (

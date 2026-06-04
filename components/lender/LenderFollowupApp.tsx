@@ -17,10 +17,16 @@ export function LenderFollowupApp({
   connected,
   connectedEmail,
   lenders,
+  initialRunId = null,
+  initialTracker = [],
+  initialCounts = null,
 }: {
   connected: boolean;
   connectedEmail: string | null;
   lenders: Lender[];
+  initialRunId?: string | null;
+  initialTracker?: TrackerLender[];
+  initialCounts?: RunCounts | null;
 }) {
   const [runId, setRunId] = useState<string | null>(null);
   const [data, setData] = useState<RunData | null>(null);
@@ -28,6 +34,8 @@ export function LenderFollowupApp({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [ownerFilter, setOwnerFilter] = useState<string>("");
+  const [importUrl, setImportUrl] = useState("");
+  const [importMsg, setImportMsg] = useState<string | null>(null);
   const owners = [...new Set(lenders.map((l) => l.owner).filter(Boolean))] as string[];
 
   async function refresh(id: string) {
@@ -63,6 +71,29 @@ export function LenderFollowupApp({
     }
     await refresh(id);
     setBusy(false);
+  }
+
+  async function importFromSheet() {
+    if (!importUrl.trim()) return;
+    setError(null);
+    setImportMsg(null);
+    setBusy(true);
+    const res = await fetch("/api/tools/lender-followup/import", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ url: importUrl.trim() }),
+    });
+    setBusy(false);
+    if (!res.ok) {
+      setError((await res.json().catch(() => ({}))).error ?? "Import failed");
+      return;
+    }
+    const s = await res.json();
+    setImportMsg(
+      `Imported ${s.lenders} lenders (${s.lendersCreated} new, ${s.lendersUpdated} updated) and ${s.items} pending items. Reloading…`,
+    );
+    // Reload so the server re-loads lenders + the imported instance as the tracker.
+    setTimeout(() => window.location.reload(), 900);
   }
 
   async function classifyQueue() {
@@ -107,11 +138,37 @@ export function LenderFollowupApp({
     );
   }
 
-  const tracker = (data?.tracker ?? []).filter((t) => !ownerFilter || t.owner === ownerFilter);
+  // Show live run data when present, otherwise the latest saved instance (e.g. a sheet import).
+  const viewRunId = data?.run.id ?? initialRunId;
+  const viewCounts = data?.run.counts ?? initialCounts;
+  const viewTracker = (data?.tracker ?? initialTracker).filter((t) => !ownerFilter || t.owner === ownerFilter);
+  const liveQueue = data?.queue ?? { ids: [], meta: [] };
 
   return (
     <div className="space-y-6">
       <p className="rounded-xl border border-line-light bg-surface-secondary/50 px-3 py-2 text-xs text-ink-tertiary">{PRIVACY}</p>
+
+      {/* Import current pendencies from the "Pendencies with Lenders" sheet */}
+      <div className="rounded-2xl border border-line bg-surface p-4 shadow-cal">
+        <h3 className="mb-1 text-sm font-medium text-ink">Import from sheet</h3>
+        <p className="mb-2 text-xs text-ink-tertiary">
+          Paste the &quot;Pendencies with Lenders&quot; Google Sheet link — the tool reads the lender columns and their owners,
+          adds any missing lenders, and loads the current pending items as the starting tracker.
+        </p>
+        <div className="flex flex-wrap gap-2">
+          <input
+            value={importUrl}
+            onChange={(e) => setImportUrl(e.target.value)}
+            placeholder="https://docs.google.com/spreadsheets/d/…"
+            className="min-w-[18rem] flex-1 rounded-lg border border-line px-3 py-2 text-sm text-gray-900"
+          />
+          <button onClick={importFromSheet} disabled={busy || !importUrl.trim()} className="rounded-lg bg-ink px-4 py-2 text-sm font-medium text-white disabled:opacity-50">
+            Import
+          </button>
+        </div>
+        {importMsg && <p className="mt-2 text-xs text-green-700">{importMsg}</p>}
+      </div>
+
       <div className="flex flex-wrap items-center gap-3">
         <span className="text-xs text-gray-500">Using Gmail access for {connectedEmail ?? "your account"}</span>
         <button onClick={run} disabled={busy} className="rounded-lg bg-brand px-4 py-2 text-sm font-medium text-white disabled:opacity-50">
@@ -130,13 +187,13 @@ export function LenderFollowupApp({
       )}
       {error && <p className="text-sm text-red-600">{error}</p>}
 
-      {data && (
+      {viewCounts && (
         <>
           <div className="flex flex-wrap items-center gap-4 text-sm">
-            <span className="rounded-full bg-surface-secondary px-3 py-1 text-ink-secondary">Lenders with items: <b>{data.run.counts.lenders_with_items}</b></span>
-            <span className="rounded-full bg-surface-secondary px-3 py-1 text-ink-secondary">Open items: <b>{data.run.counts.open_items}</b></span>
-            <span className="rounded-full bg-surface-secondary px-3 py-1 text-ink-secondary">Matched: <b>{data.run.counts.matched}</b></span>
-            <span className="rounded-full bg-surface-secondary px-3 py-1 text-ink-secondary">In review queue: <b>{data.run.counts.queued}</b></span>
+            <span className="rounded-full bg-surface-secondary px-3 py-1 text-ink-secondary">Lenders with items: <b>{viewCounts.lenders_with_items}</b></span>
+            <span className="rounded-full bg-surface-secondary px-3 py-1 text-ink-secondary">Open items: <b>{viewCounts.open_items}</b></span>
+            <span className="rounded-full bg-surface-secondary px-3 py-1 text-ink-secondary">Matched: <b>{viewCounts.matched}</b></span>
+            <span className="rounded-full bg-surface-secondary px-3 py-1 text-ink-secondary">In review queue: <b>{viewCounts.queued}</b></span>
             <div className="ml-auto flex items-center gap-2">
               {owners.length > 0 && (
                 <select value={ownerFilter} onChange={(e) => setOwnerFilter(e.target.value)} className="rounded border border-line px-2 py-1 text-sm text-gray-900">
@@ -144,14 +201,18 @@ export function LenderFollowupApp({
                   {owners.map((o) => <option key={o} value={o}>{o}</option>)}
                 </select>
               )}
-              <a href={`/api/tools/lender-followup/run/${data.run.id}/export?format=csv`} className="rounded-lg border border-line bg-surface px-3 py-1.5 text-sm hover:bg-surface-secondary">CSV</a>
-              <a href={`/api/tools/lender-followup/run/${data.run.id}/export?format=xlsx`} className="rounded-lg border border-line bg-surface px-3 py-1.5 text-sm hover:bg-surface-secondary">Excel</a>
+              {viewRunId && (
+                <>
+                  <a href={`/api/tools/lender-followup/run/${viewRunId}/export?format=csv`} className="rounded-lg border border-line bg-surface px-3 py-1.5 text-sm hover:bg-surface-secondary">CSV</a>
+                  <a href={`/api/tools/lender-followup/run/${viewRunId}/export?format=xlsx`} className="rounded-lg border border-line bg-surface px-3 py-1.5 text-sm hover:bg-surface-secondary">Excel</a>
+                </>
+              )}
             </div>
           </div>
 
           {/* Tracker */}
           <div className="space-y-4">
-            {tracker.map((t) => (
+            {viewTracker.map((t) => (
               <div key={t.lender_id ?? t.lender_name} className="rounded-2xl border border-line bg-surface p-4 shadow-cal">
                 <div className="mb-2 flex items-center justify-between">
                   <h3 className="font-medium text-ink">{t.lender_name}</h3>
@@ -159,31 +220,33 @@ export function LenderFollowupApp({
                 </div>
                 <ul className="space-y-1 text-sm">
                   {t.items.map((it, i) => (
-                    <li key={i} className="flex flex-wrap items-center gap-2 border-t border-line-light py-1">
-                      <span className="text-ink">{it.item}</span>
-                      <span className="rounded bg-surface-secondary px-2 py-0.5 text-xs text-ink-secondary">{it.status}</span>
-                      <span className="text-xs text-ink-tertiary">{it.last_update_date ?? ""}</span>
-                      <span className="text-xs text-ink-tertiary">[{it.direction}]</span>
-                      <a href={`/api/tools/lender-followup/message/${it.source_message_id}`} target="_blank" rel="noreferrer" className="ml-auto text-xs text-brand hover:underline">view email</a>
+                    <li key={i} className="flex flex-wrap items-start gap-2 border-t border-line-light py-1">
+                      <span className="whitespace-pre-wrap text-ink">{it.item}</span>
+                      {it.status && <span className="rounded bg-surface-secondary px-2 py-0.5 text-xs text-ink-secondary">{it.status}</span>}
+                      {it.last_update_date && <span className="text-xs text-ink-tertiary">{it.last_update_date}</span>}
+                      {it.direction !== "unclear" && <span className="text-xs text-ink-tertiary">[{it.direction}]</span>}
+                      {it.source_message_id && (
+                        <a href={`/api/tools/lender-followup/message/${it.source_message_id}`} target="_blank" rel="noreferrer" className="ml-auto text-xs text-brand hover:underline">view email</a>
+                      )}
                     </li>
                   ))}
                 </ul>
               </div>
             ))}
-            {tracker.length === 0 && <p className="text-sm text-ink-tertiary">No lender pendencies yet.</p>}
+            {viewTracker.length === 0 && <p className="text-sm text-ink-tertiary">No lender pendencies yet.</p>}
           </div>
 
-          {/* Review queue */}
-          {data.queue.ids.length > 0 && (
+          {/* Review queue (live runs only) */}
+          {liveQueue.ids.length > 0 && (
             <div className="rounded-2xl border border-line bg-surface p-4 shadow-cal">
               <div className="mb-2 flex items-center justify-between">
-                <h3 className="font-medium text-ink">Needs assignment ({data.queue.ids.length})</h3>
+                <h3 className="font-medium text-ink">Needs assignment ({liveQueue.ids.length})</h3>
                 <button onClick={classifyQueue} disabled={busy} className="rounded-lg border border-line px-3 py-1.5 text-sm hover:bg-surface-secondary disabled:opacity-50">
                   Classify queue (AI)
                 </button>
               </div>
               <ul className="space-y-2 text-sm">
-                {data.queue.meta.map((m) => (
+                {liveQueue.meta.map((m) => (
                   <li key={m.message_id} className="flex flex-wrap items-center gap-2 border-t border-line-light py-2">
                     <span className="text-ink-secondary">{m.from_email}</span>
                     <span className="text-ink">{m.subject}</span>
