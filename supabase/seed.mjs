@@ -27,6 +27,26 @@ async function main() {
   const { error } = await admin.from("departments").upsert(DEPARTMENTS, { onConflict: "slug" });
   if (error) throw error;
   console.log(`Upserted ${DEPARTMENTS.length} departments.`);
+
+  const { data: finance } = await admin.from("departments").select("id").eq("slug", "finance").single();
+  if (finance) {
+    const LENDERS = [
+      "Aditya Birla Capital Ltd",
+      "Axis Bank Limited (Commercial)",
+      "Bank of Maharashtra",
+      "Bank of Baroda",
+      "Cholamandalam Finance",
+      "CSB Bank Limited",
+      "Cosmos Co-operative Bank Ltd",
+      "DNSB Sahakari Bank Ltd",
+      "Federal Bank Limited",
+    ].map((name) => ({ department_id: finance.id, name }));
+    const { error: lendErr } = await admin
+      .from("lenders")
+      .upsert(LENDERS, { onConflict: "department_id,name" });
+    if (lendErr) throw lendErr;
+    console.log(`Upserted ${LENDERS.length} lenders into Finance.`);
+  }
 }
 
 main()

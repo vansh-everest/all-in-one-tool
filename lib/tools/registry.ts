@@ -10,4 +10,13 @@ export const TOOLS: ToolDef[] = [
     route: "/accounting/scrap-scale",
     requiredRole: "member",
   },
+  {
+    slug: "lender-followup",
+    name: "Lender Follow-up Tracker",
+    description: "Track open pending items per lender from unread Gmail (read-only).",
+    departmentSlug: "finance",
+    icon: "Landmark",
+    route: "/finance/lender-followup",
+    requiredRole: "member",
+  },
 ];
