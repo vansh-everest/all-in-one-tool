@@ -30,6 +30,19 @@ export default async function LenderFollowupPage() {
     grid = EMPTY_GRID;
   }
 
+  // A scan that paused (rate limit / closed tab) stays "running" — offer to resume it.
+  const { data: runningRun } = await db
+    .from("lender_runs")
+    .select("id, cursor, worklist")
+    .eq("department_id", department.id)
+    .eq("status", "running")
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  const resume = runningRun
+    ? { runId: runningRun.id as string, total: Array.isArray(runningRun.worklist) ? runningRun.worklist.length : 0, processed: (runningRun.cursor as number) ?? 0 }
+    : null;
+
   return (
     <div className="space-y-8">
       <div>
@@ -43,6 +56,7 @@ export default async function LenderFollowupPage() {
         runs={runs ?? []}
         canManage={canManage}
         grid={grid}
+        resume={resume}
       />
     </div>
   );

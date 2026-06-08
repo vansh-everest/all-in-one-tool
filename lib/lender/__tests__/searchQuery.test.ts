@@ -8,22 +8,22 @@ const lender = (over: Partial<Lender>): Lender => ({
 });
 
 describe("buildLenderQuery", () => {
-  it("restricts to unread and ORs domains, known senders, name and aliases", () => {
+  it("restricts to unread and ORs domains, known senders, and subject name/aliases", () => {
     const q = buildLenderQuery(lender({
       sender_domains: ["axisbank.com"],
       known_sender_emails: ["alerts@axisbank.com"],
       aliases: ["Axis"],
     }));
-    expect(q).toBe('is:unread (from:axisbank.com OR from:alerts@axisbank.com OR "Axis Bank Limited" OR "Axis")');
+    expect(q).toBe('is:unread (from:axisbank.com OR from:alerts@axisbank.com OR subject:"Axis Bank Limited" OR subject:"Axis")');
   });
 
-  it("strips parenthetical qualifiers from the name phrase", () => {
+  it("strips parenthetical qualifiers from the subject phrase", () => {
     const q = buildLenderQuery(lender({ name: "IndusInd Bank Ltd (R)" }));
-    expect(q).toBe('is:unread ("IndusInd Bank Ltd")');
+    expect(q).toBe('is:unread (subject:"IndusInd Bank Ltd")');
   });
 
-  it("works with just a bank name", () => {
-    expect(buildLenderQuery(lender({ name: "HSBC" }))).toBe('is:unread ("HSBC")');
+  it("works with just a bank name (subject match)", () => {
+    expect(buildLenderQuery(lender({ name: "HSBC" }))).toBe('is:unread (subject:"HSBC")');
   });
 
   it("returns null when there is nothing searchable", () => {

@@ -1,4 +1,4 @@
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { createAdminClient } from "@/utils/supabase/admin";
 import { requireFinance } from "@/lib/lender/access";
 import { getAccessToken, ReconsentRequired } from "@/lib/google/connection";
@@ -7,8 +7,12 @@ import { appendLenderActivity } from "@/lib/lender/activity";
 import { buildLenderQuery } from "@/lib/lender/searchQuery";
 import type { Lender } from "@/lib/lender/types";
 
-export async function POST() {
+export async function POST(req: NextRequest) {
   const { departmentId, userId, email } = await requireFinance();
+  const body = await req.json().catch(() => ({}));
+  // "new" = skip already-checked emails (default); "all" = re-check everything.
+  const mode: "new" | "all" = body?.mode === "all" ? "all" : "new";
+
   // Verify Gmail access up front; the per-lender searches happen in process-chunk.
   try {
     await getAccessToken(userId, LENDER_FOLLOWUP_SCOPES);
@@ -31,13 +35,13 @@ export async function POST() {
       status: "running",
       worklist,
       cursor: 0,
-      counts: { unread_total: 0, matched: 0, queued: 0, lenders_with_items: 0, open_items: 0, lenders_total: worklist.length },
-      summary: { mode: "email-search" },
+      counts: { unread_total: 0, matched: 0, queued: 0, lenders_with_items: 0, open_items: 0, lenders_total: worklist.length, emails_examined: 0 },
+      summary: { mode, matches: [] },
     })
     .select("id")
     .single();
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
 
-  await appendLenderActivity(db, run.id, `Run started — keyword-searching unread mail for ${worklist.length} lenders`);
-  return NextResponse.json({ runId: run.id, total: worklist.length });
+  await appendLenderActivity(db, run.id, `Run started (${mode === "all" ? "re-scan all" : "new mail only"}) — ${worklist.length} lenders`);
+  return NextResponse.json({ runId: run.id, total: worklist.length, mode });
 }

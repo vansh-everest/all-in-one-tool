@@ -11,27 +11,68 @@ const PRIVACY =
 // API download endpoint (built as a variable so Next's page-link lint rule doesn't flag it).
 const EXPORT_PATH = "/api/tools/lender-followup/run/current/export";
 
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
 export function LenderFollowupApp({
   connected,
   connectedEmail,
   grid,
+  resume = null,
 }: {
   connected: boolean;
   connectedEmail: string | null;
   grid: UnifiedGrid;
+  resume?: { runId: string; total: number; processed: number } | null;
 }) {
   const [progress, setProgress] = useState<{ processed: number; total: number; matched: number; examined: number } | null>(null);
   const [busy, setBusy] = useState(false);
+  const [waiting, setWaiting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [ownerFilter, setOwnerFilter] = useState<string>("");
   const [importUrl, setImportUrl] = useState("");
   const [importMsg, setImportMsg] = useState<string | null>(null);
   const owners = [...new Set(grid.columns.map((c) => c.owner).filter(Boolean))] as string[];
 
-  async function run() {
+  // Loop a run's chunks; pause+retry on rate limits (resumes exactly where it paused).
+  async function processLoop(id: string, total: number, startProcessed = 0) {
+    setProgress({ processed: startProcessed, total, matched: 0, examined: 0 });
+    let done = false;
+    let failed = false;
+    let waits = 0;
+    while (!done) {
+      const cr = await fetch(`/api/tools/lender-followup/run/${id}/process-chunk`, { method: "POST" });
+      if (!cr.ok) {
+        const body = await cr.json().catch(() => ({}));
+        setError((body as { error?: string }).error ?? "Processing error");
+        failed = true;
+        break;
+      }
+      const p = await cr.json();
+      if (p.rateLimited) {
+        setProgress((pr) => ({ processed: p.processed, total: p.total, matched: p.matched, examined: p.emailsExamined ?? pr?.examined ?? 0 }));
+        if (++waits > 40) { setError("Still rate-limited after a long wait — paused. Click Resume later to continue."); failed = true; break; }
+        setWaiting(true);
+        await sleep(30000); // all keys exhausted — wait for quota to recover, then retry the same lender
+        setWaiting(false);
+        continue;
+      }
+      waits = 0;
+      setProgress({ processed: p.processed, total: p.total, matched: p.matched, examined: p.emailsExamined ?? 0 });
+      done = p.done;
+    }
+    setBusy(false);
+    setWaiting(false);
+    if (done && !failed) window.location.reload();
+  }
+
+  async function run(mode: "new" | "all") {
     setError(null);
     setBusy(true);
-    const res = await fetch("/api/tools/lender-followup/run", { method: "POST" });
+    const res = await fetch("/api/tools/lender-followup/run", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ mode }),
+    });
     if (res.status === 409) {
       setBusy(false);
       setError("Gmail access missing — sign out and sign in again to grant gmail.readonly.");
@@ -43,24 +84,14 @@ export function LenderFollowupApp({
       return;
     }
     const { runId: id, total } = await res.json();
-    setProgress({ processed: 0, total, matched: 0, examined: 0 });
-    let done = false;
-    let failed = false;
-    while (!done) {
-      const cr = await fetch(`/api/tools/lender-followup/run/${id}/process-chunk`, { method: "POST" });
-      if (!cr.ok) {
-        const body = await cr.json().catch(() => ({}));
-        setError((body as { error?: string }).error ?? "Processing error");
-        failed = true;
-        break;
-      }
-      const p = await cr.json();
-      setProgress({ processed: p.processed, total: p.total, matched: p.matched, examined: p.emailsExamined ?? 0 });
-      done = p.done;
-    }
-    setBusy(false);
-    // Only reload on a clean finish; on error keep the message visible (no blind refresh).
-    if (done && !failed) window.location.reload();
+    await processLoop(id, total);
+  }
+
+  async function resumeRun() {
+    if (!resume) return;
+    setError(null);
+    setBusy(true);
+    await processLoop(resume.runId, resume.total, resume.processed);
   }
 
   async function importFromSheet() {
@@ -124,12 +155,21 @@ export function LenderFollowupApp({
 
       <div className="flex flex-wrap items-center gap-3">
         <span className="text-xs text-gray-500">Using Gmail access for {connectedEmail ?? "your account"}</span>
-        <button onClick={run} disabled={busy} className="rounded-lg bg-brand px-4 py-2 text-sm font-medium text-white disabled:opacity-50">
-          {busy ? "Scanning…" : "Scan unread mail"}
+        <button onClick={() => run("new")} disabled={busy} className="rounded-lg bg-brand px-4 py-2 text-sm font-medium text-white disabled:opacity-50">
+          {busy ? "Scanning…" : "Scan new mail"}
         </button>
+        <button onClick={() => run("all")} disabled={busy} className="rounded-lg border border-line bg-surface px-4 py-2 text-sm font-medium text-ink hover:bg-surface-secondary disabled:opacity-50" title="Re-check every matching email, including ones already checked">
+          Re-scan all
+        </button>
+        {resume && !busy && (
+          <button onClick={resumeRun} className="rounded-lg border border-amber-300 bg-amber-50 px-4 py-2 text-sm font-medium text-amber-800 hover:bg-amber-100">
+            Resume paused scan ({resume.processed}/{resume.total})
+          </button>
+        )}
         {progress && (
           <span className="text-sm text-gray-600">
             {progress.processed}/{progress.total} lenders · {progress.examined} emails examined · {progress.matched} threads matched
+            {waiting && <span className="ml-2 text-amber-700">· rate-limited, waiting for quota…</span>}
           </span>
         )}
       </div>

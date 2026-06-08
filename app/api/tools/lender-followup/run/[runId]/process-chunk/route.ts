@@ -23,6 +23,8 @@ const CONCURRENCY = 3;  // simultaneous thread extractions
 
 type DB = ReturnType<typeof createAdminClient>;
 
+const isRate = (e: unknown) => /\b429\b|quota|rate limit|rate-limit|exhausted/i.test(e instanceof Error ? e.message : String(e));
+
 export async function POST(_req: Request, { params }: { params: Promise<{ runId: string }> }) {
   const { runId } = await params;
   try {
@@ -36,6 +38,7 @@ export async function POST(_req: Request, { params }: { params: Promise<{ runId:
     const cursor: number = run.cursor ?? 0;
     if (cursor >= worklist.length) return finalize(db, runId, worklist.length);
 
+    const mode: "new" | "all" = run.summary?.mode === "all" ? "all" : "new";
     const { accessToken } = await getAccessToken(userId, LENDER_FOLLOWUP_SCOPES);
     const slice = worklist.slice(cursor, cursor + CHUNK);
     const { data: lendersData } = await db.from("lenders").select("*").eq("department_id", departmentId).in("id", slice);
@@ -43,6 +46,7 @@ export async function POST(_req: Request, { params }: { params: Promise<{ runId:
 
     let foundThreads = 0;
     let emailsExamined = 0;
+    let rateLimited = false;
     const newItems: Record<string, unknown>[] = [];
     // Per-run record of every matched thread (reliable per run, unlike the shared cache).
     const matches: Record<string, unknown>[] = [];
@@ -56,11 +60,18 @@ export async function POST(_req: Request, { params }: { params: Promise<{ runId:
 
         // One message per thread (newest first from search), so we don't extract a thread twice.
         const seen = new Set<string>();
-        const threadMsgs: { id: string; threadId: string }[] = [];
+        let threadMsgs: { id: string; threadId: string }[] = [];
         for (const r of refs) {
           if (seen.has(r.threadId)) continue;
           seen.add(r.threadId);
           threadMsgs.push(r);
+        }
+        // "new" mode: skip messages we've already checked in a previous scan.
+        if (mode === "new" && threadMsgs.length) {
+          const ids = threadMsgs.map((t) => t.id);
+          const { data: alreadySeen } = await db.from("lender_message_cache").select("message_id").eq("department_id", departmentId).in("message_id", ids);
+          const seenIds = new Set((alreadySeen ?? []).map((r) => r.message_id as string));
+          threadMsgs = threadMsgs.filter((t) => !seenIds.has(t.id));
         }
         foundThreads += threadMsgs.length;
 
@@ -108,8 +119,10 @@ export async function POST(_req: Request, { params }: { params: Promise<{ runId:
               items: ext.items.map((it) => it.item),
             };
             return { tasks, match };
-          } catch {
-            // One thread failing (rate limit, parse, Gmail) must not fail the whole scan.
+          } catch (e) {
+            // A rate-limit must pause the whole run (re-thrown to the lender handler);
+            // any other single-thread error just skips that thread.
+            if (isRate(e)) throw e;
             return { tasks: [] as Record<string, unknown>[], match: null as Record<string, unknown> | null };
           }
         });
@@ -138,9 +151,9 @@ export async function POST(_req: Request, { params }: { params: Promise<{ runId:
           }
           if (toAdd.length) await db.from("lender_items").insert(toAdd);
         }
-      } catch {
-        // Skip this lender on a search/Gmail error and keep going.
-        continue;
+      } catch (e) {
+        if (isRate(e)) { rateLimited = true; break; } // all keys exhausted — pause, don't advance
+        continue; // non-rate error: skip this lender and keep going
       }
     }
 
@@ -154,7 +167,6 @@ export async function POST(_req: Request, { params }: { params: Promise<{ runId:
       await db.from("lender_run_items").insert(runItems);
     }
 
-    const newCursor = cursor + slice.length;
     const counts = {
       ...(run.counts ?? {}),
       matched: (run.counts?.matched ?? 0) + foundThreads,
@@ -163,6 +175,15 @@ export async function POST(_req: Request, { params }: { params: Promise<{ runId:
     };
     const prevMatches: Record<string, unknown>[] = Array.isArray(run.summary?.matches) ? run.summary.matches : [];
     const summary = { ...(run.summary ?? {}), matches: [...prevMatches, ...matches] };
+
+    // Rate-limited: persist whatever we got, but DON'T advance — the client waits and retries
+    // this same lender once a key frees up (the run resumes exactly where it paused).
+    if (rateLimited) {
+      await db.from("lender_runs").update({ counts, summary }).eq("id", runId);
+      return NextResponse.json({ processed: cursor, total: worklist.length, matched: counts.matched, emailsExamined: counts.emails_examined, rateLimited: true, done: false });
+    }
+
+    const newCursor = cursor + slice.length;
     await db.from("lender_runs").update({ cursor: newCursor, counts, summary }).eq("id", runId);
 
     if (newCursor >= worklist.length) return finalize(db, runId, worklist.length);

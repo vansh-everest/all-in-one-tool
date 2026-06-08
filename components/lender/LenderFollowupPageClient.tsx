@@ -8,9 +8,10 @@ import type { Lender, UnifiedGrid } from "@/lib/lender/types";
 type Run = { id: string; created_at: string; created_by_email: string | null; status: string; counts: { matched?: number; open_items?: number; lenders_with_items?: number; queued?: number } | null };
 
 export function LenderFollowupPageClient({
-  connected, connectedEmail, lenders, runs, canManage, grid,
+  connected, connectedEmail, lenders, runs, canManage, grid, resume,
 }: {
   connected: boolean; connectedEmail: string | null; lenders: Lender[]; runs: Run[]; canManage: boolean; grid: UnifiedGrid;
+  resume: { runId: string; total: number; processed: number } | null;
 }) {
   const [tab, setTab] = useState<"tracker" | "lenders">("tracker");
   return (
@@ -28,7 +29,7 @@ export function LenderFollowupPageClient({
       </div>
       {tab === "tracker" ? (
         <>
-          <LenderFollowupApp connected={connected} connectedEmail={connectedEmail} grid={grid} />
+          <LenderFollowupApp connected={connected} connectedEmail={connectedEmail} grid={grid} resume={resume} />
           <LenderRunHistory runs={runs} canManage={canManage} />
         </>
       ) : (

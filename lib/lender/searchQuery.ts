@@ -1,16 +1,18 @@
 import type { Lender } from "./types";
 
-/** A phrase term for Gmail search: strip parenthetical qualifiers, collapse spaces, quote. */
-function phrase(name: string): string | null {
+/** A subject phrase term: strip parenthetical qualifiers, collapse spaces, quote. */
+function subjectPhrase(name: string): string | null {
   const cleaned = (name ?? "").replace(/\([^)]*\)/g, " ").replace(/\s+/g, " ").trim();
-  if (cleaned.length < 3) return null; // too short/generic to phrase-search safely
-  return `"${cleaned.replace(/"/g, "")}"`;
+  if (cleaned.length < 3) return null; // too short to phrase-search safely
+  return `subject:"${cleaned.replace(/"/g, "")}"`;
 }
 
 /**
- * Build a Gmail search query that finds UNREAD mail likely belonging to this lender:
- * its sender domains/known senders (precise) OR its name/aliases as phrases (recall).
- * Returns null when there's nothing searchable.
+ * Build a Gmail query that finds UNREAD mail genuinely FROM this lender:
+ *   - its sender domains / known sender emails (precise), OR
+ *   - its name / aliases appearing in the SUBJECT (not the body).
+ * Restricting the name match to the subject (never the body) stops internal emails that
+ * merely mention a bank from matching. Returns null when nothing is searchable.
  */
 export function buildLenderQuery(lender: Lender): string | null {
   const terms: string[] = [];
@@ -22,10 +24,10 @@ export function buildLenderQuery(lender: Lender): string | null {
     const em = e.trim().toLowerCase();
     if (em) terms.push(`from:${em}`);
   }
-  const namePhrase = phrase(lender.name);
-  if (namePhrase) terms.push(namePhrase);
+  const subj = subjectPhrase(lender.name);
+  if (subj) terms.push(subj);
   for (const a of lender.aliases) {
-    const p = phrase(a);
+    const p = subjectPhrase(a);
     if (p && !terms.includes(p)) terms.push(p);
   }
   if (!terms.length) return null;
