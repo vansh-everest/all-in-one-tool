@@ -23,6 +23,8 @@ function cellText(v) {
   return String(v).trim();
 }
 const isEmail = (s) => /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(s);
+// Free-mail domains must never become a lender's sender_domain (gmail.com etc. would match everything).
+const FREE_DOMAINS = new Set(["gmail.com", "yahoo.com", "yahoo.co.in", "hotmail.com", "outlook.com", "rediffmail.com", "live.com", "icloud.com", "ymail.com"]);
 const STOP = new Set(["bank","ltd","limited","private","pvt","the","co","op","cooperative","coop","services","service","finance","financial","capital","fincap","advisors","trusteeship","sahakari","and","of","india","group"]);
 function key(name) {
   const s = String(name).toLowerCase().replace(/\(.*?\)/g, " ").replace(/[^a-z0-9\s]/g, " ");
@@ -40,7 +42,11 @@ ws.eachRow((row, n) => {
   if (!name) return;
   const email = cellText(row.getCell(7).value).toLowerCase();
   if (!banksMap.has(name)) banksMap.set(name, { emails: new Set(), domains: new Set() });
-  if (email && isEmail(email)) { banksMap.get(name).emails.add(email); banksMap.get(name).domains.add(email.split("@")[1]); }
+  if (email && isEmail(email)) {
+    banksMap.get(name).emails.add(email);
+    const dom = email.split("@")[1];
+    if (!FREE_DOMAINS.has(dom)) banksMap.get(name).domains.add(dom); // keep the address, drop the free domain
+  }
 });
 const canonical = [...banksMap.entries()].map(([name, v]) => ({ name, emails: [...v.emails], domains: [...v.domains], key: key(name) }));
 
