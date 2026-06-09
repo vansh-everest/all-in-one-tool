@@ -127,3 +127,37 @@ export async function getFull(
   const bodyText = msg.payload ? decodeBodyParts(msg.payload as GmailPart) : "";
   return { id: meta.id, threadId: meta.threadId, from: meta.from, subject: meta.subject, date: meta.date, internalDate: meta.internalDate, bodyText };
 }
+
+type GmailFullPart = { filename?: string; mimeType?: string; body?: { attachmentId?: string; data?: string }; parts?: GmailFullPart[] };
+
+/** Full message JSON (for walking attachments). */
+export async function getFullRaw(token: string, id: string): Promise<{ id: string; threadId: string; payload?: GmailFullPart; headers: { name: string; value: string }[] }> {
+  const res = await gFetch(token, `/messages/${id}?format=full`);
+  if (!res.ok) throw new Error(`Gmail full ${res.status}: ${(await res.text()).slice(0, 200)}`);
+  const msg = await res.json();
+  return { id: msg.id, threadId: msg.threadId, payload: msg.payload, headers: msg.payload?.headers ?? [] };
+}
+
+const ATTACH_MIME = /^(application\/pdf|image\/(png|jpe?g))$/i;
+
+/** Walk a payload tree for downloadable invoice attachments (pdf/png/jpg). */
+export function listAttachments(payload: GmailFullPart | undefined): { filename: string; attachmentId: string; mimeType: string }[] {
+  const out: { filename: string; attachmentId: string; mimeType: string }[] = [];
+  const walk = (p?: GmailFullPart) => {
+    if (!p) return;
+    if (p.filename && p.body?.attachmentId && ATTACH_MIME.test(p.mimeType ?? "")) {
+      out.push({ filename: p.filename, attachmentId: p.body.attachmentId, mimeType: (p.mimeType ?? "").toLowerCase() });
+    }
+    p.parts?.forEach(walk);
+  };
+  walk(payload);
+  return out;
+}
+
+/** Download one attachment as base64 (Gmail returns base64url; normalise to base64). */
+export async function getAttachment(token: string, messageId: string, attachmentId: string): Promise<string> {
+  const res = await gFetch(token, `/messages/${messageId}/attachments/${attachmentId}`);
+  if (!res.ok) throw new Error(`Gmail attachment ${res.status}: ${(await res.text()).slice(0, 200)}`);
+  const json = await res.json();
+  return String(json.data ?? "").replace(/-/g, "+").replace(/_/g, "/");
+}
