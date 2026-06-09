@@ -12,5 +12,5 @@ export async function buildZohoWorkbook(rows: MappedRow[]): Promise<Buffer> {
   const dd = wb.addWorksheet("DropdownData");
   dd.addRow(["Yes"]);
   const out = await wb.xlsx.writeBuffer();
-  return out as Buffer;
+  return Buffer.from(out as ArrayBuffer);
 }
