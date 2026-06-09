@@ -207,3 +207,31 @@ future runs.
 
 **Privacy:** only full content of matched-lender emails is fetched and sent to Gemini; all other
 unread mail stays metadata-only.
+
+## Invoice → Zoho Bills (Finance)
+
+OCRs invoice emails from a Gmail label into the exact 36-column Zoho purchase-bill template and
+exports a Zoho-ready Excel. Uses only the `https://www.googleapis.com/auth/gmail.readonly` scope —
+**email is never marked read**, and only mail carrying the chosen label is opened.
+
+**One-time setup:** run `node --env-file=.env.local supabase/apply-0009.mjs`. Ensure `gmail.readonly`
+is granted on the Google connection (sign out / sign in to re-consent if prompted).
+
+**Label setup:** in the **Config** tab, set the Gmail label that finance applies to invoice emails,
+a since-date (defaults to today), and the mapping profile. A "Car Rental" profile is seeded with the
+default constant column values (Accounts Payable, Account Code, TDS %, GST tax names, etc.), all of
+which are editable inline and saved back to the profile.
+
+**Mapping profile:** each row = one invoice. Constant columns come from the active profile; OCR fills
+Bill Date, Vendor, Bill Number, GSTIN, HSN/SAC, Item Total, CGST/SGST/IGST/CESS, Adjustment; Tax
+Amount, TDS Amount and Rate are computed. Rows that fail validation (low confidence, missing required
+fields, totals mismatch) are flagged and tinted amber. Click a row to audit the source attachment
+(PDF/image) against the OCR-read JSON and the mapped Zoho values.
+
+**Dedup / incremental:** each processed (message, attachment) pair is recorded, so re-running the same
+day picks up nothing new; only newly-labelled invoices are processed. The run pipeline is chunked,
+resumable, and rate-limit-safe (pauses and resumes exactly where it stopped).
+
+**Zoho export:** **Download Excel** builds a workbook with a "Bills" sheet (the 36 headers + rows) and
+a "DropdownData" sheet, ready to import straight into Zoho Books. Run history supports per-run row
+detail, admin delete, and an A/B compare that diffs two runs by Bill Number (new / removed / changed).
