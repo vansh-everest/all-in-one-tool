@@ -1,10 +1,10 @@
 // app/api/tools/invoice-zoho/profiles/route.ts
 import { NextRequest, NextResponse } from "next/server";
 import { createAdminClient } from "@/utils/supabase/admin";
-import { requireFinance } from "@/lib/lender/access";
+import { requireAccounting } from "@/lib/scrap-scale/access";
 
 export async function GET() {
-  const { departmentId } = await requireFinance();
+  const { departmentId } = await requireAccounting();
   const db = createAdminClient();
   const { data } = await db
     .from("invoice_mapping_profiles")
@@ -15,7 +15,7 @@ export async function GET() {
 }
 
 export async function POST(req: NextRequest) {
-  const { departmentId } = await requireFinance();
+  const { departmentId } = await requireAccounting();
   const body = await req.json().catch(() => ({}));
   if (!body?.name || typeof body.name !== "string") {
     return NextResponse.json({ error: "name is required" }, { status: 400 });

@@ -7,7 +7,7 @@ import { DEFAULT_CONSTANTS } from "@/lib/invoice/schema";
 import type { InvoiceConfigT, InvoiceProfile, InvoiceRow, InvoiceRunSummary } from "@/components/invoice/types";
 
 export default async function InvoiceZohoPage() {
-  const { user, department, role } = await requireDepartmentAccess("finance");
+  const { user, department, role } = await requireDepartmentAccess("accounting");
   const canManage = role === "admin" || role === "super";
   const conn = await getConnection(user.id, LENDER_FOLLOWUP_SCOPES);
   const db = createAdminClient();

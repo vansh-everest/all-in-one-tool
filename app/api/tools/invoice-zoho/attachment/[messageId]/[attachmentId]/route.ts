@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { createAdminClient } from "@/utils/supabase/admin";
-import { requireFinance } from "@/lib/lender/access";
+import { requireAccounting } from "@/lib/scrap-scale/access";
 import { getAccessToken, ReconsentRequired } from "@/lib/google/connection";
 import { LENDER_FOLLOWUP_SCOPES } from "@/lib/google/scopes";
 import { getAttachment } from "@/lib/google/gmail";
@@ -9,7 +9,7 @@ import { getAttachment } from "@/lib/google/gmail";
 // processed by this department.
 export async function GET(_req: Request, { params }: { params: Promise<{ messageId: string; attachmentId: string }> }) {
   const { messageId, attachmentId } = await params;
-  const { departmentId, userId } = await requireFinance();
+  const { departmentId, userId } = await requireAccounting();
   const db = createAdminClient();
 
   const { data: processed } = await db

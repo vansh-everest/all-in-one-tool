@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { createAdminClient } from "@/utils/supabase/admin";
-import { requireFinance } from "@/lib/lender/access";
+import { requireAccounting } from "@/lib/scrap-scale/access";
 import { getAccessToken } from "@/lib/google/connection";
 import { LENDER_FOLLOWUP_SCOPES } from "@/lib/google/scopes";
 import { getFullRaw, listAttachments, getAttachment } from "@/lib/google/gmail";
@@ -23,7 +23,7 @@ const isRate = (e: unknown) => /\b429\b|quota|rate limit|rate-limit|exhausted/i.
 export async function POST(_req: Request, { params }: { params: Promise<{ runId: string }> }) {
   const { runId } = await params;
   try {
-    const { departmentId, userId } = await requireFinance();
+    const { departmentId, userId } = await requireAccounting();
     const db = createAdminClient();
 
     const { data: run } = await db.from("invoice_runs").select("*").eq("id", runId).single();

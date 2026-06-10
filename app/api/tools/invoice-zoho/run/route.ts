@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createAdminClient } from "@/utils/supabase/admin";
-import { requireFinance } from "@/lib/lender/access";
+import { requireAccounting } from "@/lib/scrap-scale/access";
 import { getAccessToken, ReconsentRequired } from "@/lib/google/connection";
 import { LENDER_FOLLOWUP_SCOPES } from "@/lib/google/scopes";
 import { appendInvoiceActivity } from "@/lib/invoice/activity";
@@ -10,7 +10,7 @@ import { searchMessageRefs } from "@/lib/google/gmail";
 const SEARCH_MAX = 200;
 
 export async function POST(req: NextRequest) {
-  const { departmentId, userId, email } = await requireFinance();
+  const { departmentId, userId, email } = await requireAccounting();
   const body = await req.json().catch(() => ({}));
 
   const db = createAdminClient();

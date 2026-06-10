@@ -1,10 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createAdminClient } from "@/utils/supabase/admin";
-import { requireFinance } from "@/lib/lender/access";
+import { requireAccounting } from "@/lib/scrap-scale/access";
 import { DEFAULT_CONSTANTS } from "@/lib/invoice/schema";
 
 export async function GET() {
-  const { departmentId } = await requireFinance();
+  const { departmentId } = await requireAccounting();
   const db = createAdminClient();
   let { data: profiles } = await db.from("invoice_mapping_profiles").select("*").eq("department_id", departmentId).order("created_at");
   if (!profiles?.length) {
@@ -20,7 +20,7 @@ export async function GET() {
 }
 
 export async function POST(req: NextRequest) {
-  const { departmentId } = await requireFinance();
+  const { departmentId } = await requireAccounting();
   const body = await req.json().catch(() => ({}));
   const patch: Record<string, unknown> = { department_id: departmentId, updated_at: new Date().toISOString() };
   if (typeof body.gmail_label === "string") patch.gmail_label = body.gmail_label.trim();

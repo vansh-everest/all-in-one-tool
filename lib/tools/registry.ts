@@ -23,9 +23,9 @@ export const TOOLS: ToolDef[] = [
     slug: "invoice-zoho",
     name: "Invoice → Zoho Bills",
     description: "OCR invoice emails into the Zoho purchase-bill template (Excel export).",
-    departmentSlug: "finance",
+    departmentSlug: "accounting",
     icon: "ReceiptText",
-    route: "/finance/invoice-zoho",
+    route: "/accounting/invoice-zoho",
     requiredRole: "member",
   },
 ];

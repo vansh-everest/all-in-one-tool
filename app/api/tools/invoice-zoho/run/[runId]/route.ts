@@ -1,11 +1,11 @@
 import { NextResponse } from "next/server";
 import { createAdminClient } from "@/utils/supabase/admin";
-import { requireFinance, requireFinanceAdmin } from "@/lib/lender/access";
+import { requireAccounting, requireAccountingAdmin } from "@/lib/scrap-scale/access";
 
 // Run detail: the run plus its mapped invoice rows (ordered for the grid).
 export async function GET(_req: Request, { params }: { params: Promise<{ runId: string }> }) {
   const { runId } = await params;
-  const { departmentId } = await requireFinance();
+  const { departmentId } = await requireAccounting();
   const db = createAdminClient();
 
   const { data: run } = await db
@@ -30,7 +30,7 @@ export async function DELETE(_req: Request, { params }: { params: Promise<{ runI
   const { runId } = await params;
   let departmentId: string;
   try {
-    ({ departmentId } = await requireFinanceAdmin());
+    ({ departmentId } = await requireAccountingAdmin());
   } catch {
     return NextResponse.json({ error: "Admins only" }, { status: 403 });
   }

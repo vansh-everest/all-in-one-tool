@@ -1,13 +1,13 @@
 import { NextResponse } from "next/server";
 import { createAdminClient } from "@/utils/supabase/admin";
-import { requireFinance } from "@/lib/lender/access";
+import { requireAccounting } from "@/lib/scrap-scale/access";
 import { buildZohoWorkbook } from "@/lib/invoice/excel";
 import type { MappedRow } from "@/lib/invoice/mapping";
 
 // Exports this run's mapped rows as a Zoho-ready purchase-bill workbook.
 export async function GET(_req: Request, { params }: { params: Promise<{ runId: string }> }) {
   const { runId } = await params;
-  const { departmentId } = await requireFinance();
+  const { departmentId } = await requireAccounting();
   const db = createAdminClient();
 
   const { data: run } = await db

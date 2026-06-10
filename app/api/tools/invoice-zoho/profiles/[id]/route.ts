@@ -1,11 +1,11 @@
 // app/api/tools/invoice-zoho/profiles/[id]/route.ts
 import { NextRequest, NextResponse } from "next/server";
 import { createAdminClient } from "@/utils/supabase/admin";
-import { requireFinance, requireFinanceAdmin } from "@/lib/lender/access";
+import { requireAccounting, requireAccountingAdmin } from "@/lib/scrap-scale/access";
 
 export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  const { departmentId } = await requireFinance();
+  const { departmentId } = await requireAccounting();
   const body = await req.json().catch(() => ({}));
   const patch: Record<string, unknown> = {};
   if (typeof body.name === "string") patch.name = body.name.trim();
@@ -28,7 +28,7 @@ export async function DELETE(_req: NextRequest, { params }: { params: Promise<{ 
   const { id } = await params;
   let departmentId: string;
   try {
-    ({ departmentId } = await requireFinanceAdmin());
+    ({ departmentId } = await requireAccountingAdmin());
   } catch {
     return NextResponse.json({ error: "Admins only" }, { status: 403 });
   }
